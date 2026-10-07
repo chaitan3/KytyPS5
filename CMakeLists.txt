@@ -545,6 +545,12 @@ add_executable(event_queue_lifetime_tests EXCLUDE_FROM_ALL
 target_link_libraries(event_queue_lifetime_tests common fmt::fmt)
 target_include_directories(event_queue_lifetime_tests PRIVATE ${inc_headers})
 
+add_executable(hang_watchdog_tests EXCLUDE_FROM_ALL
+	"${KYTY_TESTS_DIR}/HangWatchdogTests.cpp"
+)
+target_link_libraries(hang_watchdog_tests common fmt::fmt)
+target_include_directories(hang_watchdog_tests PRIVATE ${inc_headers})
+
 add_kyty_full_emulator_test(kernel_file_system_tests
 	"${KYTY_TESTS_DIR}/KernelFileSystemTests.cpp")
 target_link_libraries(kernel_file_system_tests ZArchive::zarchive)
@@ -623,6 +629,7 @@ if(BUILD_TESTING)
 	add_test(NAME resource_materialization COMMAND $<TARGET_FILE:resource_materialization_tests>)
 	add_test(NAME resource_tracking COMMAND $<TARGET_FILE:resource_tracking_tests>)
 	add_test(NAME event_queue_lifetime COMMAND $<TARGET_FILE:event_queue_lifetime_tests>)
+	add_test(NAME hang_watchdog COMMAND $<TARGET_FILE:hang_watchdog_tests>)
 	add_test(NAME kernel_file_system COMMAND $<TARGET_FILE:kernel_file_system_tests>)
 	add_test(NAME sync_on_address COMMAND $<TARGET_FILE:sync_on_address_tests>)
 	add_test(NAME audio_out2_port COMMAND $<TARGET_FILE:audio_out2_port_tests>)
@@ -698,6 +705,7 @@ if(BUILD_TESTING)
 		resource_tracking_tests
 		event_queue_lifetime_tests
 		kernel_file_system_tests
+		hang_watchdog_tests
 		sync_on_address_tests
 		shader_recompiler_compute_tests
 		virtual_memory_allocation_tests

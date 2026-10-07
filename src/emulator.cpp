@@ -4,6 +4,7 @@
 #include "common/assert.h"
 #include "common/emulatorConfig.h"
 #include "common/file.h"
+#include "common/hangWatchdog.h"
 #include "common/logging/log.h"
 #include "common/profiler.h"
 #include "common/singleton.h"
@@ -148,7 +149,9 @@ static void Init(const Config::ConfigOptions& cfg, const std::filesystem::path& 
 	subsystems.Initialize<Libs::LibKernel::FileSystem::Lifecycle>();
 	subsystems.Initialize<Libs::Controller::Lifecycle>();
 	subsystems.Initialize<Libs::Audio::Lifecycle>();
-	subsystems.Initialize<Libs::Graphics::Lifecycle>();
+	if (std::getenv("KYTY_DUMP_ELF") == nullptr) {
+		subsystems.Initialize<Libs::Graphics::Lifecycle>();
+	}
 }
 
 static void LoadElf(const std::filesystem::path& elf, bool dbg_print_reloc = false,
@@ -193,6 +196,13 @@ void Run(const RunOptions& options) {
 	Common::Subsystems subsystems(true);
 	Init(options.config, param_json, subsystems);
 
+	Common::HangWatchdog::Options watchdog_options;
+	watchdog_options.enabled    = Config::HangWatchdogSeconds() > 0;
+	watchdog_options.timeout_ms = Config::HangWatchdogSeconds() * 1000u;
+	watchdog_options.heartbeat  = std::getenv("KYTY_WATCHDOG_HEARTBEAT") != nullptr;
+	Common::HangWatchdog::Configure(watchdog_options);
+	Common::HangWatchdog::Start();
+
 	ClearDebugTextureFolder();
 
 	PrintSystemInfo();
@@ -217,6 +227,13 @@ void Run(const RunOptions& options) {
 	Libs::InitAll(rt->Symbols());
 
 	LoadElf(options.elf);
+
+	// Debug aid: dump the decrypted guest ELF for static analysis, then stop.
+	if (const char* dump = std::getenv("KYTY_DUMP_ELF"); dump != nullptr && dump[0] != '\0') {
+		rt->SaveMainProgram(dump);
+		Log::WriteToConsoleAndLog(fmt::format("Dumped guest ELF to {}\n", dump));
+		std::quick_exit(0);
+	}
 
 	Execute(options.game_patch);
 }

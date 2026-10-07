@@ -1,6 +1,7 @@
 #include "common/abi.h"
 #include "common/assert.h"
 #include "common/common.h"
+#include "common/hangWatchdog.h"
 #include "common/logging/log.h"
 #include "common/singleton.h"
 #include "common/stringUtils.h"
@@ -75,7 +76,24 @@ const char** GetArgv() {
 static KYTY_SYSV_ABI void exit(int code) {
 	PRINT_NAME();
 
-	::exit(code);
+	LOGF("\t exit code = %d, caller = 0x%016" PRIx64 "\n", code,
+	     reinterpret_cast<uint64_t>(__builtin_return_address(0)));
+
+	Common::HangWatchdog::Dump("guest exit()");
+
+	// Debug aid: freeze instead of exiting so gdb can inspect the guest state.
+	if (std::getenv("KYTY_HANG_ON_EXIT") != nullptr) {
+		LOGF("KYTY_HANG_ON_EXIT set: freezing before exit\n");
+		for (;;) {
+			Common::Thread::SleepMicro(1000000);
+		}
+	}
+
+	// Terminate the whole emulator the same way Emulator::Execute() does. Host
+	// ::exit() would run atexit()/static destructors (including RuntimeLinker::Clear,
+	// which nulls the TLS main program) while other guest threads are still
+	// running, which crashes them.
+	std::quick_exit(code);
 }
 
 static void PrintAbortStringCandidate(const char* name, uint64_t addr) {
@@ -621,6 +639,19 @@ static uint32_t g_need_flag = 1;
 
 int KYTY_SYSV_ABI vprintf(const char* str, VaList* c) {
 	PRINT_NAME();
+
+	if (const char* path = std::getenv("KYTY_GUEST_PRINTF_FILE"); path != nullptr &&
+	    str != nullptr && c != nullptr) {
+		char    buf[4096] = {};
+		VaList  copy      = *c;
+		va_list ap;
+		std::memcpy(&ap, &copy, sizeof(copy));
+		std::vsnprintf(buf, sizeof(buf), str, ap);
+		if (FILE* f = std::fopen(path, "a"); f != nullptr) {
+			std::fprintf(f, "[vprintf] %s\n", buf);
+			std::fclose(f);
+		}
+	}
 
 	return GetGuestVprintfFunc()(str, c);
 }

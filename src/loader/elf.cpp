@@ -601,7 +601,9 @@ void Elf64::Save(const std::filesystem::path& file_name) {
 		SaveEhdr64(f, m_ehdr.get());
 
 		SavePhdr64(f, m_ehdr->e_phoff, m_ehdr->e_phnum, m_phdr.get());
-		SaveShdr64(f, m_ehdr->e_shoff, m_ehdr->e_shnum, m_shdr.get());
+		if (m_shdr != nullptr) {
+			SaveShdr64(f, m_ehdr->e_shoff, m_ehdr->e_shnum, m_shdr.get());
+		}
 
 		for (uint16_t i = 0; i < m_ehdr->e_phnum; i++) {
 			if (m_phdr[i].p_filesz == 0u) {
@@ -621,7 +623,7 @@ void Elf64::Save(const std::filesystem::path& file_name) {
 			EXIT_IF(bytes_written == 0);
 		}
 
-		for (uint16_t i = 0; i < m_ehdr->e_shnum; i++) {
+		for (uint16_t i = 0; m_shdr != nullptr && i < m_ehdr->e_shnum; i++) {
 			if (m_shdr[i].sh_size == 0u) {
 				continue;
 			}

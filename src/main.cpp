@@ -92,6 +92,11 @@ static void PrintUsage() {
 	::printf(
 	    "  --skip-notice-screen <true|false>    Skip startup logos and notices in supported games.\n"
 	    "                                      Default: false.\n");
+	::printf(
+	    "  --hang-watchdog <seconds>            Dump every guest thread (last library call and\n"
+	    "                                      current wait) when no guest progress is seen for this\n"
+	    "                                      many seconds. 0 disables. SIGUSR1 dumps on demand.\n"
+	    "                                      Default: 0.\n");
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
 	::printf("  --redzone                            Protect the guest SysV red zone.\n");
 #endif
@@ -441,6 +446,11 @@ static bool ParseArgs(int argc, char* argv[], RunOptions& options, bool& show_he
 		} else if (arg == "--skip-notice-screen") {
 			if (!ParseBool(value, options.config.skip_notice_screen)) {
 				::printf("invalid boolean for %s: %s\n", arg.c_str(), value.c_str());
+				return false;
+			}
+		} else if (arg == "--hang-watchdog") {
+			if (!ParseUint32(value, options.config.hang_watchdog_seconds)) {
+				::printf("invalid seconds for %s: %s\n", arg.c_str(), value.c_str());
 				return false;
 			}
 		} else if (arg == "--keymap") {

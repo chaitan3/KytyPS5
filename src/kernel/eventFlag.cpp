@@ -2,6 +2,7 @@
 
 #include "common/assert.h"
 #include "common/common.h"
+#include "common/hangWatchdog.h"
 #include "common/logging/log.h"
 #include "common/stringUtils.h"
 #include "common/threads.h"
@@ -136,11 +137,15 @@ KernelEventFlagPrivate::Result KernelEventFlagPrivate::Wait(uint64_t bits, WaitM
 
 		m_waiting_threads++;
 
+		Common::HangWatchdog::EnterWait(
+		    "eventflag", bits,
+		    wait_mode == WaitMode::And ? static_cast<uint64_t>(1) : static_cast<uint64_t>(2));
 		if (infinitely) {
 			m_cond_var.Wait(&m_mutex);
 		} else {
 			m_cond_var.WaitFor(&m_mutex, micros - elapsed);
 		}
+		Common::HangWatchdog::LeaveWait();
 
 		m_waiting_threads--;
 
@@ -267,6 +272,8 @@ int KYTY_SYSV_ABI KernelCreateEventFlag(KernelEventFlag* ef, const char* name, u
 
 	*ef = new KernelEventFlagPrivate(std::string(name), single, fifo, init_pattern);
 
+	Common::HangWatchdog::RegisterNamedObject(reinterpret_cast<uint64_t>(*ef), name);
+
 	LOGF("\tEventFlag create: %s\n", name);
 
 	return OK;
@@ -278,6 +285,8 @@ int KYTY_SYSV_ABI KernelDeleteEventFlag(KernelEventFlag ef) {
 	if (ef == nullptr) {
 		return KERNEL_ERROR_ESRCH;
 	}
+
+	Common::HangWatchdog::UnregisterNamedObject(reinterpret_cast<uint64_t>(ef));
 
 	delete ef;
 
@@ -291,6 +300,8 @@ int KYTY_SYSV_ABI KernelWaitEventFlag(KernelEventFlag ef, uint64_t bit_pattern, 
 	if (ef == nullptr) {
 		return KERNEL_ERROR_ESRCH;
 	}
+
+	Common::HangWatchdog::RecordCallArgs(reinterpret_cast<uint64_t>(ef), bit_pattern);
 
 	if (bit_pattern == 0) {
 		return KERNEL_ERROR_EINVAL;
@@ -320,6 +331,8 @@ int KYTY_SYSV_ABI KernelPollEventFlag(KernelEventFlag ef, uint64_t bit_pattern, 
 		return KERNEL_ERROR_ESRCH;
 	}
 
+	Common::HangWatchdog::RecordCallArgs(reinterpret_cast<uint64_t>(ef), bit_pattern);
+
 	if (bit_pattern == 0) {
 		return KERNEL_ERROR_EINVAL;
 	}
@@ -347,6 +360,8 @@ int KYTY_SYSV_ABI KernelSetEventFlag(KernelEventFlag ef, uint64_t bit_pattern) {
 		return KERNEL_ERROR_ESRCH;
 	}
 
+	Common::HangWatchdog::RecordCallArgs(reinterpret_cast<uint64_t>(ef), bit_pattern);
+
 	ef->Set(bit_pattern);
 
 	return OK;
@@ -358,6 +373,8 @@ int KYTY_SYSV_ABI KernelClearEventFlag(KernelEventFlag ef, uint64_t bit_pattern)
 	if (ef == nullptr) {
 		return KERNEL_ERROR_ESRCH;
 	}
+
+	Common::HangWatchdog::RecordCallArgs(reinterpret_cast<uint64_t>(ef), bit_pattern);
 
 	ef->Clear(bit_pattern);
 

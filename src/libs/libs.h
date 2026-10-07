@@ -2,6 +2,7 @@
 #define EMULATOR_INCLUDE_EMULATOR_LIBS_LIBS_H_
 
 #include "common/abi.h"
+#include "common/hangWatchdog.h"
 #include "common/logging/log.h"
 #include "common/stringUtils.h"
 #include "common/threads.h"
@@ -50,9 +51,12 @@
 
 // NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
 #define PRINT_NAME()                                                                               \
-	if (PRINT_NAME_ENABLED) {                                                                      \
-		Libs::PrintName(g_library, g_module, __func__);                                              \
-	}
+	do {                                                                                           \
+		::Common::HangWatchdog::RecordCall(g_library, g_module, __func__, false);                   \
+		if (PRINT_NAME_ENABLED) {                                                                  \
+			Libs::PrintName(g_library, g_module, __func__);                                        \
+		}                                                                                          \
+	} while (false)
 
 namespace Loader {
 class SymbolDatabase;

@@ -78,6 +78,7 @@ struct ConfigOptions {
 	bool                   trophy_enabled              = true;
 	bool                   playgo_hack_enabled         = false;
 	bool                   skip_notice_screen          = false;
+	uint32_t               hang_watchdog_seconds       = 0;
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
 	bool red_zone_protection_enabled = false;
 #endif
@@ -130,6 +131,7 @@ bool TessellationEnabled();
 bool TrophyEnabled();
 bool PlayGoHackEnabled();
 bool SkipNoticeScreen();
+uint32_t HangWatchdogSeconds();
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
 bool RedZoneProtectionEnabled();
 #endif

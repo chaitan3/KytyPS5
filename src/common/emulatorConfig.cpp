@@ -172,6 +172,10 @@ bool SkipNoticeScreen() {
 	return g_config->skip_notice_screen;
 }
 
+uint32_t HangWatchdogSeconds() {
+	return g_config->hang_watchdog_seconds;
+}
+
 #if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS
 bool RedZoneProtectionEnabled() {
 	return g_config->red_zone_protection_enabled;

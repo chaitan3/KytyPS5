@@ -4,6 +4,7 @@
 #include "common/common.h"
 #include "common/dateTime.h"
 #include "common/emulatorConfig.h"
+#include "common/hangWatchdog.h"
 #include "common/hostException.h"
 #include "common/logging/log.h"
 #include "common/singleton.h"
@@ -22,6 +23,7 @@
 #include <cerrno>
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <memory>
@@ -1024,6 +1026,9 @@ void PthreadInitSelfForMainThread() {
 #endif
 	g_pthread_self->host_thread_id = os_thread_id;
 	g_pthread_main                 = g_pthread_self;
+
+	Common::HangWatchdog::RegisterThread(g_pthread_self->guest.thread_id,
+	                                     g_pthread_self->name.c_str(), os_thread_id, true);
 
 	LOGF("\tPthread main self: id = %d, os_thread_id = %" PRIu64 ", stack_addr = 0x%016" PRIx64
 	     ", stack_size = %" PRIu64 "\n",
@@ -3175,6 +3180,8 @@ static void CleanupThread(void* arg) {
 	auto* rt = Common::Singleton<Loader::RuntimeLinker>::Instance();
 	rt->DeleteTlss(thread->unique_id);
 
+	Common::HangWatchdog::UnregisterThread();
+
 	thread->almost_done = true;
 }
 
@@ -3216,6 +3223,9 @@ static void* RunThread(void* arg) {
 	     reinterpret_cast<uint64_t>(thread->entry), reinterpret_cast<uint64_t>(thread->arg),
 	     reinterpret_cast<uint64_t>(thread->attr->stack_addr),
 	     static_cast<uint64_t>(thread->attr->stack_size));
+
+	Common::HangWatchdog::RegisterThread(thread->guest.thread_id, thread->name.c_str(),
+	                                     os_thread_id);
 
 	// NOLINTNEXTLINE(cppcoreguidelines-pro-type-cstyle-cast)
 	pthread_cleanup_push(CleanupThread, thread);
@@ -3840,12 +3850,44 @@ void KYTY_SYSV_ABI KernelSetThreadDtors(thread_dtors_func_t dtors) {
 }
 
 int KYTY_SYSV_ABI KernelUsleep(KernelUseconds microseconds) {
+	Common::HangWatchdog::EnterWait("usleep", microseconds,
+	                                reinterpret_cast<uint64_t>(__builtin_return_address(0)));
+
+	if (microseconds == 0x184ac && std::getenv("KYTY_TRACE_SLEEP") != nullptr) {
+		uint64_t rbp_val = 0;
+		asm volatile("movq %%rbp, %0" : "=r"(rbp_val));
+		uint64_t frame = rbp_val != 0 ? *reinterpret_cast<uint64_t*>(rbp_val) : 0;
+		for (int i = 0; i < 8 && frame > 0x10000; i++) {
+			const auto ret = *reinterpret_cast<uint64_t*>(frame + 8);
+			LOGF("\t sleep frame %d: ret=0x%016" PRIx64 "\n", i, ret);
+			frame = *reinterpret_cast<uint64_t*>(frame);
+		}
+
+		// CoD Vanguard builds its fatal message into this global and calls
+		// Sys_Error("%s", &global). Read it while the error handler sleeps.
+		const auto* msg = reinterpret_cast<const char*>(0x90500b6e0ULL);
+		char        text[257] = {};
+		for (int i = 0; i < 256; i++) {
+			const char c = msg[i];
+			if (c == 0) {
+				break;
+			}
+			text[i] = (c >= 32 && c < 127) ? c : '.';
+		}
+		LOGF("\t sys_error message: %s\n", text);
+	}
+
 	SleepMicroWithSignalPoll(microseconds);
+	Common::HangWatchdog::LeaveWait();
 	return OK;
 }
 
 unsigned int KYTY_SYSV_ABI KernelSleep(unsigned int seconds) {
-	SleepMicroWithSignalPoll(static_cast<uint64_t>(seconds) * 1000000ull);
+	const auto microseconds = static_cast<uint64_t>(seconds) * 1000000ull;
+	Common::HangWatchdog::EnterWait("sleep", microseconds,
+	                                reinterpret_cast<uint64_t>(__builtin_return_address(0)));
+	SleepMicroWithSignalPoll(microseconds);
+	Common::HangWatchdog::LeaveWait();
 	return OK;
 }
 
@@ -3866,7 +3908,9 @@ int KYTY_SYSV_ABI KernelNanosleep(const KernelTimespec* rqtp, KernelTimespec* rm
 	uint64_t nanos =
 	    static_cast<uint64_t>(rqtp->tv_sec) * 1000000000ull + static_cast<uint64_t>(rqtp->tv_nsec);
 
+	Common::HangWatchdog::EnterWait("nanosleep", nanos);
 	SleepNanoWithSignalPoll(nanos);
+	Common::HangWatchdog::LeaveWait();
 
 	if (rmtp != nullptr) {
 		rmtp->tv_sec  = 0;

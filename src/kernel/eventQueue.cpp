@@ -2,6 +2,7 @@
 
 #include "common/assert.h"
 #include "common/common.h"
+#include "common/hangWatchdog.h"
 #include "common/logging/log.h"
 #include "common/stringUtils.h"
 #include "common/threads.h"
@@ -193,6 +194,8 @@ int KernelEqueuePrivate::WaitForEvents(KernelEvent* ev, int num, uint32_t micros
 
 		uint32_t   timer_wait = 0;
 		const bool has_timer  = GetNextTimerWaitMicros(MonotonicTimeNs(), &timer_wait);
+		Common::HangWatchdog::EnterWait("equeue", static_cast<uint64_t>(m_handle),
+		                                static_cast<uint64_t>(num));
 		if (micros == 0 && !has_timer) {
 			m_cond_var.Wait(&m_mutex);
 		} else {
@@ -200,6 +203,7 @@ int KernelEqueuePrivate::WaitForEvents(KernelEvent* ev, int num, uint32_t micros
 			m_cond_var.WaitFor(&m_mutex,
 			                   has_timer ? std::min(external_wait, timer_wait) : external_wait);
 		}
+		Common::HangWatchdog::LeaveWait();
 
 		elapsed = static_cast<uint32_t>(t.GetTimeS() * 1000000.0);
 	}
@@ -340,6 +344,8 @@ int KYTY_SYSV_ABI KernelCreateEqueue(KernelEqueue* eq, const char* name) {
 		g_equeues.emplace(*eq, std::move(owner));
 	}
 
+	Common::HangWatchdog::RegisterNamedObject(static_cast<uint64_t>(*eq), name);
+
 	LOGF("\tEqueue create: %s\n", name);
 
 	return OK;
@@ -389,6 +395,7 @@ int KYTY_SYSV_ABI KernelDeleteEqueue(KernelEqueue eq) {
 	}
 
 	LOGF("\tEqueue delete: %s\n", owner->GetName().c_str());
+	Common::HangWatchdog::UnregisterNamedObject(static_cast<uint64_t>(eq));
 	owner->Close();
 
 	return OK;
