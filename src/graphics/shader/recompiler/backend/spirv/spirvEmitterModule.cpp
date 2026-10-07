@@ -5,6 +5,13 @@
 
 namespace Libs::Graphics::ShaderRecompiler::Spirv::Emitter {
 
+// Mirrors AllowMissingBarycentric() in window/vulkanWindow.cpp. When the selected Vulkan
+// driver lacks VK_KHR_fragment_shader_barycentric, emit shaders that do not need it.
+static bool SpirvBarycentricSupported() {
+	static const bool supported = std::getenv("KYTY_ALLOW_MISSING_BARYCENTRIC") == nullptr;
+	return supported;
+}
+
 uint32_t TypeVoid(EmitterState& state) {
 	if (state.void_type == 0) {
 		state.void_type = state.builder.Type(spv::OpTypeVoid);
@@ -450,6 +457,19 @@ void DefineInputs(EmitterState& state) {
 		}
 	}
 	for (auto& input: state.inputs) {
+		if (!SpirvBarycentricSupported() &&
+		    (input.kind == IR::StageInputKind::BaryCoordSmooth ||
+		     input.kind == IR::StageInputKind::BaryCoordNoPerspective ||
+		     input.kind == IR::StageInputKind::BaryCoordSmoothCentroid)) {
+			// Driver has no SPV_KHR_fragment_shader_barycentric: leave the variable undefined
+			// so reads resolve to zero instead of emitting an unsupported builtin.
+			input.variable_id = 0;
+			continue;
+		}
+		if (!SpirvBarycentricSupported()) {
+			// Lower per-vertex parameter arrays to ordinary interpolated inputs.
+			input.per_vertex = false;
+		}
 		if (state.program.stage == ShaderType::Pixel &&
 		    input.kind == IR::StageInputKind::Parameter) {
 			const auto location = PixelParameterLocation(state, input.location);
@@ -733,7 +753,7 @@ void DefineModule(EmitterState& state) {
 		state.builder.RequireExtension("SPV_KHR_compute_shader_derivatives");
 	}
 	const bool fragment_barycentric =
-	    state.program.stage == ShaderType::Pixel &&
+	    SpirvBarycentricSupported() && state.program.stage == ShaderType::Pixel &&
 	    std::any_of(state.inputs.begin(), state.inputs.end(), [](const InputBinding& input) {
 		    return input.per_vertex || input.kind == IR::StageInputKind::BaryCoordSmooth ||
 		           input.kind == IR::StageInputKind::BaryCoordNoPerspective;
