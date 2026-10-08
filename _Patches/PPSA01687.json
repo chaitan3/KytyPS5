@@ -14,6 +14,17 @@
                     "on": "85c00f8505000000e83b090000"
                 }
             ]
+        },
+        {
+            "name": "Skip DEV ERROR 426 offline-login gate (online state callback)",
+            "enabled": true,
+            "memory": [
+                {
+                    "offset": "0x900e61286",
+                    "off": "488b05e32fb408803800749b",
+                    "on": "488b05e32fb408803800eb9b"
+                }
+            ]
         }
     ]
 }
