@@ -1,20 +1,9 @@
 {
     "id": "PPSA01687",
-    "name": "Call of Duty: Vanguard - skip fatal init error (DEV ERROR 968)",
+    "name": "Call of Duty: Vanguard - skip DEV ERROR 426 offline-login gate",
     "version": "01.027.000",
     "process": "eboot.bin",
     "mods": [
-        {
-            "name": "Skip the nested-setjmp fatal path and continue init",
-            "enabled": true,
-            "memory": [
-                {
-                    "offset": "0x900470da8",
-                    "off": "85c00f8521090000e83b090000",
-                    "on": "85c00f8505000000e83b090000"
-                }
-            ]
-        },
         {
             "name": "Skip DEV ERROR 426 offline-login gate (online state callback)",
             "enabled": true,
