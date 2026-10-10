@@ -1,0 +1,48 @@
+# PR title
+
+loader: stop expanding the host stack once the guard page cannot be extended
+
+# PR description
+
+Running the Windows build under Wine on Linux, every game boot showed Wine's
+crash dialog ("The application has encountered a serious problem and needs to
+close") before the game continued normally; the dialog never appeared on native
+Windows.
+
+The cause was the Windows-only host-stack pre-expansion in `RuntimeLinker::Execute`.
+Guest code has no Windows stack probes and module initializers run on the host
+stack, so before calling any guest code the emulator grows the main thread's host
+stack by touching its guard page until 768 KiB have been committed. On Wine the
+main-thread stack is already fully committed with the guard page sitting at the
+very bottom of the reservation, so that write has nothing left to grow into and
+raises `EXCEPTION_STACK_OVERFLOW`. The emulator's vectored exception handler does
+not resolve stack overflows (only access violations and illegal instructions), so
+the exception escapes to Wine's unhandled-exception path and Wine shows its crash
+dialog. Dismissing it lets Wine retry the (now-committed) guard page, the loop
+finishes, and the game boots — which is why the dialog was harmless but annoying.
+
+## What's fixed
+
+- **Stop touching the guard page when the stack cannot grow.** The expansion loop
+  now breaks as soon as there is no reserved space left below the guard page
+  (`stack.reserved_size <= stack.guard_size`). On Wine this makes the loop a
+  no-op on the first iteration, so no overflow is raised and no crash dialog
+  appears. On native Windows the reserved region below the guard stays large
+  (roughly 1 MiB minus the committed portion) for the whole loop, so the
+  768 KiB expansion target is still reached and behavior is unchanged.
+
+## Why it's safe
+
+- The change is confined to the existing `#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS`
+  block in `RuntimeLinker::Execute`; Linux, macOS, and all other code paths are
+  untouched.
+- On Windows the new condition never fires during normal operation: the loop still
+  commits the full 768 KiB before the reserved region shrinks below the guard-page
+  size. It only changes the path where the guard is already at the bottom of the
+  reservation, which is exactly the state in which touching it would overflow.
+
+## Testing
+
+- Windows build under Wine: Demon's Souls (PPSA01341) boots with no crash dialog.
+- Native Windows: expansion still runs to its 768 KiB target; no behavioral change.
+- `_Build/linux` build unaffected (change is Windows-only).

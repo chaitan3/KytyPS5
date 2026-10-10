@@ -1,0 +1,171 @@
+# Branch `linux_fixes` (vs `main`) — Linux-only fixes, no Windows regression
+
+All 6 commits on this branch (parent `6eed46b` = main tip) are Linux-motivated fixes for
+getting Demon's Souls (PPSA01341) running on Linux. None of them alter Windows-only code
+paths in a way that could regress the game, which already worked on Windows on `main`.
+
+## Per-commit analysis
+
+### 09d7299 libC: stop guest tm overflow in mktime and strftime on Linux
+Linux-only in effect.
+- `mktime`: the change lives in the `#else` of `#if KYTY_PLATFORM == KYTY_PLATFORM_WINDOWS`;
+  Windows keeps `_mktime64(timeptr)` untouched.
+- `strftime`: the change is under `#if KYTY_PLATFORM == KYTY_PLATFORM_LINUX && !defined(__APPLE__)`;
+  Windows/Apple untouched.
+- Caveat (non-Windows): the `mktime` `#else` also covers macOS, whose BSD `std::tm` lacks
+  `tm_gmtoff`/`tm_zone` — that could break the macOS build. Not Windows, not the target.
+
+### a21f095 fiber: fix context save jumping to stack address on linux
+Cross-platform x86-64 fix (the `push %rbp` frame-pointer prologue bug was latent on all
+x86-64; it only manifested as SIGILL on Linux when a fiber completed its first run).
+- Naked-function rewrite matches the existing `__attribute__((naked))` usage in
+  `runtimeLinker.cpp:1076`, so it compiles with the GNU-asm-capable Windows toolchain.
+- Adds explicit Win64 argument passing (`%rcx`/`%rdx` for `_WIN32`) vs SysV (`%rdi`/`%rsi`),
+  so it is more correct on Windows, not a regression.
+- The non-x86-64 `#else` fallback is unchanged.
+
+### 3a6f9cb hostException: run Linux fault handlers on a private altstack
+Strictly Linux-only.
+- `SetupSignalStack()` is an empty no-op on Windows and Apple.
+- The `sigaction`/`SA_ONSTACK` change is only in the Linux `#else` branch.
+- `pthread.cpp` just calls the no-op on Windows.
+
+### ac476c7 bufferCache: read upload sources through the guest backing
+Cross-platform code, Linux-motivated (fixes the "memory tracker re-entered from upload
+callback" EXIT 65 on Linux).
+- `TryReadBacking` reads the same `GuestBackingStore` data that the guest mapping mirrors on
+  both platforms (backing exists on Windows via `m_handle`/`m_backing_base`), so upload
+  behavior is equivalent on Windows, and the zero-fallback for unbacked copies is strictly
+  safer.
+- `HandleFault` only adds a fallback that resolves more read cases (GPU-dirty pages not in
+  registered GPU ranges) through the buffer cache — a generic correctness improvement.
+
+### 61206aa bufferCache: stop corrupting the allocation ledger in the garbage collector
+Pure cross-platform correctness fix: `RunGarbageCollector` was overwriting the
+Register/Unregister byte ledger with raw VMA heap usage, causing the "allocation accounting
+underflow" abort once a large merged buffer was retired after a collection. It now samples
+device usage into a local and keeps `m_total_used_memory` as a pure ledger. Fixes a latent
+bug that could trip on any platform; strictly more correct.
+
+### a900caa memoryTracker: keep protection updates atomic; fix lock order
+Uniform cross-platform lock-order consistency fix.
+- Every protection path acquires the guest-address-space mutex before any region-tracking
+  lock; `GuestAddressSpace::m_mutex` is made recursive because `ProtectTransient` re-acquires
+  it on the same thread.
+- Texture-cache page-watcher updates (which bypass the memory tracker) take the same guard;
+  `InvalidateRegion` scopes the guard so `on_flush` (`SendCommandSync`) runs with no tracking
+  locks held.
+- The deadlock only manifests on Linux (a guest thread faulting on its own stack while it was
+  swept read-only by the GPU during a syscall that holds the address-space mutex), but the
+  ordering is consistent everywhere, so there is no new deadlock on Windows and behavior is
+  otherwise unchanged.
+
+## Why Linux needs the two performance-relevant changes (root cause detail)
+
+### 1. memoryTracker: GuestAS mutex held before region locks, including across uploads
+
+**Why Linux needs it.** The GPU write-watching sweeps mprotect the flexible-memory region to
+`PROT_READ` to detect CPU writes. Guest thread stacks are allocated inside that same region,
+so a sweep can remove write permission from a guest thread's *own stack* at any moment. If
+that thread is mid-syscall — e.g. `KernelReserveVirtualRange` ->
+`FindFreeAlignedUnlocked` — it is holding the guest-address-space mutex (GuestAS), which the
+GPU's `mprotect` (ProtectTransient) must also acquire to walk the mapping registry. When the
+sweep hits its stack, the next stack write faults; the fault handler must mark the page
+CPU-modified, which requires a region-tracking lock. The GPU holds that very region lock while
+it waits for GuestAS (held by the faulting thread): ABBA deadlock.
+
+The fix's rule is: never acquire GuestAS while holding a region lock. Because the bookkeeping
+(`m_cpu_dirty`/`m_writable`) and the `mprotect` must stay atomic, the `mprotect` runs *under*
+the region lock — so the region lock may only be held while GuestAS is already owned. In
+`ForEachUploadRange` the region lock spans `upload_func()` for the `is_written=true` path
+(pre-existing on main), so GuestAS must span it too; the guard is placed at function scope and
+therefore also covers the `!is_written` upload.
+
+**Cost & why it is mostly unavoidable.** The `!is_written` upload path (region locks already
+released before `upload_func()`) could release GuestAS before the upload — that is the
+low-risk optimization offered earlier. The `is_written=true` path cannot without restructuring
+the upstream region-lock hold. Either way the GPU thread owns GuestAS for the duration of an
+upload, so guest memory syscalls (mmap/mprotect/reserve/batch-map) queue up behind it. This
+only matters on Linux because it is the Linux flexible-memory sweep of guest stacks that
+creates the lock inversion.
+
+### 2. bufferCache: reading upload sources through the guest backing (TryReadBacking)
+
+**Why Linux needs it.** `UploadCopies` fills a staging buffer by copying each modified buffer
+range from the guest's virtual address into host memory. On Linux, when a guest unmaps or
+releases a flexible-memory block, the emulator replaces that part of the address space with an
+anonymous `PROT_NONE` mapping (it cannot keep a live placeholder view of the released backing
+the way it does on Windows). If the buffer cache still holds a buffer that overlaps pages the
+guest has just freed, the next upload's `memcpy` from that guest address reads an unmapped /
+read-protected page and faults. That fault would normally be resolved by the fault handler, but
+the upload runs while `s_upload_owner` is set, so the handler's memory-tracker re-entry aborts
+with "memory tracker re-entered from upload callback" (EXIT 65). On Windows the released
+placeholder stays mapped, so the direct read does not fault and the failure does not reproduce.
+
+The fix reads each copy through `TryReadBacking`, which copies from the backing store (the
+memfd alias, mapped independently of the guest view's protection) and zeroes unbacked copies.
+
+**Cost.** `TryReadBacking` replaces a bare `memcpy` with a transfer that takes the
+GuestBackingStore mutex, walks the sparse backing map twice (`FindContainingUnlocked`,
+once to validate, once to copy), then memcpys per contiguous segment. The bytes copied are
+identical (guest view and backing are the same memfd), so large copies are dominated by the
+memcpy itself and the overhead is small; many small copies pay the lock + two binary-searched
+map lookups each. It also serializes concurrent backing transfers that previously had no lock.
+The change is cross-platform, but it is only *required* on Linux because only Linux tears the
+guest view down on release.
+
+## Why Windows doesn't need each fix
+
+### 09d7299 libC tm overflow
+The Windows `_mktime64` CRT path writes back only the classic 36-byte `struct tm` layout,
+which matches the guest Orbis layout (no `tm_gmtoff`/`tm_zone`), so there is no buffer
+overflow and no stack-canary clobber. The `strftime` change is additionally guarded to Linux
+only, so Windows keeps its original path. The overflow only exists where the host libc's
+`std::tm` is bigger than the guest's — glibc on Linux.
+
+### a21f095 fiber context save
+Latent cross-platform x86-64 bug, not strictly Linux-only: the `push %rbp` prologue shifting
+`(%rsp)` can clobber the saved return address on any platform that emits a frame pointer for
+that function. The game simply did not reproduce the SIGILL on Windows on `main` (the exact
+"fiber completes its first run" codegen/path), and the build flags do not allow blaming
+frame-pointer omission with certainty. The naked rewrite is a strict correctness improvement
+on both platforms — Windows doesn't *need* it to boot, but it cannot regress it (Win64
+argument registers are handled explicitly).
+
+### 3a6f9cb altstack
+Fault-handler stacks are only threatened on Linux: the flexible-memory GPU sweeps mprotect
+the shared guest region to `PROT_READ`, and the Linux kernel cannot build a signal frame on
+read-only pages (silent SIGSEGV). Windows uses SEH (`ExceptionFilter`) rather than
+`sigaction`/`sigaltstack`, so `SetupSignalStack()` is an empty no-op there and `SA_ONSTACK`
+is never applied — the mechanism itself does not exist on Windows.
+
+### 169723a bufferCache upload backing
+On Linux a guest-unmapped (released) flexible-memory page is replaced by an anonymous
+`PROT_NONE` mapping, so `UploadCopies`' direct `memcpy` from the guest virtual address faults
+inside the upload callback. On Windows the equivalent release preserves a placeholder view, so
+the direct read does not fault — the failure does not reproduce on Windows. The
+`HandleFault` read fallback is generic hardening that Windows also benefits from but did not
+need to boot.
+
+### 0a6c1b5 GC ledger
+Not Linux-specific: this is a latent cross-platform ledger bug (overwriting the
+Register/Unregister ledger with raw VMA usage). Windows on `main` did not trip it because the
+specific pattern (a large merged buffer retired right after a collection under memory
+pressure) did not occur in this game's Windows run. It is a pure correctness fix that Windows
+would also benefit from, and it does not change behavior when the bug is not triggered.
+
+### 164acc3 memoryTracker lock order
+The deadlock requires a guest thread to fault on its own stack while inside a syscall that
+holds the guest-address-space mutex, and a GPU sweep to hold a region-tracking lock while
+waiting for that mutex. The stack is only swept read-only by the GPU on Linux (same
+flexible-memory region that triggers the altstack fix), so the lock-order inversion never
+occurred on Windows. The change is applied uniformly, but it is only observably needed on
+Linux.
+
+## Overall conclusion
+No Windows-only path is altered. Three fixes are strictly Linux-only in effect (tm overflow,
+altstack, memoryTracker lock order — all driven by Linux host-libc/flexible-memory/kernel
+behavior). Two are latent cross-platform bugs that Windows happened not to manifest (fiber
+context save, GC ledger) and only stand to benefit from the fixes. The upload-backing change
+is Linux-driven with a generic hardening. The only flagged concern is a potential macOS build
+break in `09d7299`'s `mktime` branch, which is outside the Windows/Linux question.

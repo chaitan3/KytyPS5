@@ -1,0 +1,31 @@
+{
+    "id": "PPSA21567",
+    "mods": [
+        {
+            "enabled": true,
+            "memory": [
+                {
+                    "off": "4584f60f84f10800004531f64c8d3d8ec4a90141b430",
+                    "offset": "0x73b3bcf",
+                    "on": "4584f6e9f2080000904531f64c8d3d8ec4a90141b430"
+                }
+            ],
+            "name": "Select the existing non-tiled deferred-lighting renderer"
+        },
+        {
+            "enabled": true,
+            "memory": [
+                {
+                    "off": "0fb682a00700008887e4050000",
+                    "offset": "0x70cd9c3",
+                    "on": "b80000000090908887e4050000"
+                }
+            ],
+            "name": "Disable GI probes and lighting shaders"
+        }
+    ],
+    "name": "ASTRO BOT: non RT patch",
+    "process": "eboot.bin",
+    "source_sha256": "c3e9f057859643e7df104223e32ecd82e5a223c97ca3b8216e727a3a85624d89",
+    "version": "01.018.000"
+}
