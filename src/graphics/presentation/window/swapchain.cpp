@@ -17,6 +17,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <limits>
 #include <memory>
 #include <vector>
@@ -25,6 +28,58 @@
 // IWYU pragma: no_include <intrin.h>
 
 namespace Libs::Graphics {
+
+// TEMP (headless testing): when running on a software Vulkan driver that does
+// not advertise every optimal-tiling feature, don't hard-fail on the format
+// checks. Gated by the same variable as the barycentric fallback.
+static bool AllowMissingFormatFeatures() {
+	static const bool allow = std::getenv("KYTY_ALLOW_MISSING_BARYCENTRIC") != nullptr;
+	return allow;
+}
+
+// TEMP (debug): dump presented frames as binary PPM files so a headless run can
+// be inspected visually. Enabled with KYTY_DUMP_FRAME=<path-prefix>; dumps one
+// frame every KYTY_DUMP_FRAME_INTERVAL frames (default 60), up to
+// KYTY_DUMP_FRAME_COUNT files (default 24).
+static const char* FrameDumpPrefix() {
+	static const char* prefix = std::getenv("KYTY_DUMP_FRAME");
+	return prefix;
+}
+
+static uint32_t FrameDumpInterval() {
+	static const uint32_t interval = [] {
+		const char* value = std::getenv("KYTY_DUMP_FRAME_INTERVAL");
+		const auto  parsed = value != nullptr ? std::strtoul(value, nullptr, 10) : 0;
+		return parsed != 0 ? static_cast<uint32_t>(parsed) : 60u;
+	}();
+	return interval;
+}
+
+static uint32_t FrameDumpCount() {
+	static const uint32_t count = [] {
+		const char* value = std::getenv("KYTY_DUMP_FRAME_COUNT");
+		const auto  parsed = value != nullptr ? std::strtoul(value, nullptr, 10) : 0;
+		return parsed != 0 ? static_cast<uint32_t>(parsed) : 24u;
+	}();
+	return count;
+}
+
+static bool FindHostMemoryType(const GraphicContext& graphics, uint32_t type_bits,
+                               uint32_t* memory_type_index) {
+	const auto& memory = graphics.GetPhysicalDeviceMemoryProperties();
+	for (uint32_t index = 0; index < memory.memoryTypeCount; index++) {
+		const auto properties = memory.memoryTypes[index].propertyFlags;
+		if ((type_bits & (1u << index)) != 0 &&
+		    (properties & vk::MemoryPropertyFlagBits::eHostVisible) !=
+		        vk::MemoryPropertyFlagBits {} &&
+		    (properties & vk::MemoryPropertyFlagBits::eHostCoherent) !=
+		        vk::MemoryPropertyFlagBits {}) {
+			*memory_type_index = index;
+			return true;
+		}
+	}
+	return false;
+}
 
 struct Presenter::Frame {
 	VulkanImage   image;
@@ -164,8 +219,12 @@ void Presenter::Frame::Configure(GraphicContext& graphics, vk::Extent2D extent, 
 	    vk::FormatFeatureFlagBits::eSampledImage | vk::FormatFeatureFlagBits::eTransferSrc |
 	    vk::FormatFeatureFlagBits::eTransferDst;
 	if ((features & required) != required) {
-		EXIT("prepared presentation format lacks optimal blit support: format=%d features=0x%x\n",
-		     static_cast<int>(format), static_cast<vk::FormatFeatureFlags::MaskType>(features));
+		if (!AllowMissingFormatFeatures()) {
+			EXIT("prepared presentation format lacks optimal blit support: format=%d features=0x%x\n",
+			     static_cast<int>(format),
+			     static_cast<vk::FormatFeatureFlags::MaskType>(features));
+		}
+		LOGF("warning: prepared presentation format lacks features; continuing headless\n");
 	}
 
 	if (dst.image != nullptr) {
@@ -269,6 +328,9 @@ public:
 	                               const Presenter::Layer& overlay, bool draw_system_overlay);
 	uint64_t Submit(CommandScheduler& scheduler);
 	[[nodiscard]] Status Present();
+	// TEMP (debug): frame dumping helpers, see FrameDumpPrefix().
+	void RecordFrameDump(CommandBuffer& command, const Presenter::Frame* source);
+	void FlushFrameDump();
 
 	[[nodiscard]] uint32_t ImageCount() const noexcept {
 		return static_cast<uint32_t>(m_images.size());
@@ -296,6 +358,16 @@ private:
 	vk::Sampler                    m_overlay_sampler     = nullptr;
 	uint32_t                       m_image_index         = static_cast<uint32_t>(-1);
 	uint32_t                       m_frame_index         = 0;
+	// TEMP (debug): frame dump state.
+	uint64_t                       m_dump_counter        = 0;
+	uint32_t                       m_dump_written        = 0;
+	vk::Buffer                     m_dump_buffer         = nullptr;
+	vk::DeviceMemory               m_dump_memory         = nullptr;
+	uint64_t                       m_dump_size           = 0;
+	uint32_t                       m_dump_width          = 0;
+	uint32_t                       m_dump_height         = 0;
+	vk::Format                     m_dump_format         = vk::Format::eUndefined;
+	bool                           m_dump_pending        = false;
 };
 
 struct Presenter::Impl {
@@ -399,7 +471,8 @@ void Swapchain::Create() {
 	}
 	m_format                      = format.format;
 	const auto swapchain_features = graphics.GetFormatProperties(m_format).optimalTilingFeatures;
-	if (!static_cast<bool>(swapchain_features & vk::FormatFeatureFlagBits::eBlitDst)) {
+	if (!static_cast<bool>(swapchain_features & vk::FormatFeatureFlagBits::eBlitDst) &&
+	    !AllowMissingFormatFeatures()) {
 		EXIT("swapchain format cannot be a blit destination: format=%d\n",
 		     static_cast<int>(m_format));
 	}
@@ -521,6 +594,14 @@ void Swapchain::Destroy() {
 	}
 	if (m_handle != nullptr) {
 		graphics.device.destroySwapchainKHR(m_handle, nullptr);
+	}
+
+	if (m_dump_buffer != nullptr) {
+		graphics.device.destroyBuffer(m_dump_buffer, nullptr);
+		graphics.device.freeMemory(m_dump_memory, nullptr);
+		m_dump_buffer = nullptr;
+		m_dump_memory = nullptr;
+		m_dump_size   = 0;
 	}
 
 	m_handle        = nullptr;
@@ -727,6 +808,7 @@ void Swapchain::RecordPresentCommands(CommandBuffer& command, Presenter::Frame* 
 		source->Transit(vk_command, vk::ImageLayout::eTransferSrcOptimal,
 		                vk::AccessFlagBits2::eTransferRead);
 	}
+	RecordFrameDump(command, source);
 	if (draw_overlay) {
 		overlay.frame->Transit(vk_command, vk::ImageLayout::eShaderReadOnlyOptimal,
 		                       vk::AccessFlagBits2::eShaderRead);
@@ -823,6 +905,101 @@ void Swapchain::RecordPresentCommands(CommandBuffer& command, Presenter::Frame* 
 	}
 }
 
+// TEMP (debug): record a copy of the presented source image into a host-visible
+// buffer so FlushFrameDump() can write it out after the frame is submitted.
+void Swapchain::RecordFrameDump(CommandBuffer& command, const Presenter::Frame* source) {
+	if (FrameDumpPrefix() == nullptr || source == nullptr || m_dump_written >= FrameDumpCount()) {
+		return;
+	}
+	const bool dump_this = (m_dump_counter % FrameDumpInterval()) == 0;
+	m_dump_counter++;
+	if (!dump_this) {
+		return;
+	}
+	auto&      graphics = m_window.graphic_ctx;
+	const auto width    = source->image.extent.width;
+	const auto height   = source->image.extent.height;
+	if (width == 0 || height == 0) {
+		return;
+	}
+	const auto size = static_cast<uint64_t>(width) * height * 4;
+	if (m_dump_buffer == nullptr || m_dump_size != size) {
+		if (m_dump_buffer != nullptr) {
+			graphics.device.destroyBuffer(m_dump_buffer, nullptr);
+			graphics.device.freeMemory(m_dump_memory, nullptr);
+			m_dump_buffer = nullptr;
+			m_dump_memory = nullptr;
+		}
+		vk::BufferCreateInfo info {};
+		info.sType       = vk::StructureType::eBufferCreateInfo;
+		info.size        = size;
+		info.usage       = vk::BufferUsageFlagBits::eTransferDst;
+		info.sharingMode = vk::SharingMode::eExclusive;
+		RequireVulkanSuccess(graphics.device.createBuffer(&info, nullptr, &m_dump_buffer),
+		                     "create frame dump buffer");
+		vk::MemoryRequirements requirements {};
+		graphics.device.getBufferMemoryRequirements(m_dump_buffer, &requirements);
+		uint32_t memory_type = 0;
+		if (!FindHostMemoryType(graphics, requirements.memoryTypeBits, &memory_type)) {
+			return;
+		}
+		vk::MemoryAllocateInfo allocate {};
+		allocate.sType           = vk::StructureType::eMemoryAllocateInfo;
+		allocate.allocationSize  = requirements.size;
+		allocate.memoryTypeIndex = memory_type;
+		RequireVulkanSuccess(graphics.device.allocateMemory(&allocate, nullptr, &m_dump_memory),
+		                     "allocate frame dump memory");
+		RequireVulkanSuccess(graphics.device.bindBufferMemory(m_dump_buffer, m_dump_memory, 0),
+		                     "bind frame dump memory");
+		m_dump_size = size;
+	}
+	vk::BufferImageCopy region {};
+	region.imageSubresource.aspectMask = vk::ImageAspectFlagBits::eColor;
+	region.imageSubresource.layerCount = 1;
+	region.imageExtent                 = {width, height, 1};
+	command.Handle().copyImageToBuffer(source->image.image, vk::ImageLayout::eTransferSrcOptimal,
+	                                   m_dump_buffer, 1, &region);
+	m_dump_pending = true;
+	m_dump_width   = width;
+	m_dump_height  = height;
+	m_dump_format  = source->image.format;
+}
+
+void Swapchain::FlushFrameDump() {
+	if (!m_dump_pending) {
+		return;
+	}
+	m_dump_pending = false;
+	auto& graphics = m_window.graphic_ctx;
+	{
+		Common::LockGuard lock(graphics.queue_mutex);
+		RequireVulkanSuccess(graphics.queue.waitIdle(), "wait for frame dump");
+	}
+	void* data = nullptr;
+	RequireVulkanSuccess(graphics.device.mapMemory(m_dump_memory, 0, m_dump_size, {}, &data),
+	                     "map frame dump memory");
+	const auto* source = static_cast<const uint8_t*>(data);
+	const bool  bgr    = m_dump_format == vk::Format::eB8G8R8A8Unorm ||
+	                  m_dump_format == vk::Format::eB8G8R8A8Srgb;
+	std::vector<uint8_t> rgb(static_cast<size_t>(m_dump_width) * m_dump_height * 3);
+	for (size_t index = 0; index < static_cast<size_t>(m_dump_width) * m_dump_height; index++) {
+		rgb[index * 3 + 0] = bgr ? source[index * 4 + 2] : source[index * 4 + 0];
+		rgb[index * 3 + 1] = source[index * 4 + 1];
+		rgb[index * 3 + 2] = bgr ? source[index * 4 + 0] : source[index * 4 + 2];
+	}
+	char path[1024];
+	std::snprintf(path, sizeof(path), "%s_%05u.ppm", FrameDumpPrefix(), m_dump_written);
+	FILE* file = std::fopen(path, "wb");
+	if (file != nullptr) {
+		std::fprintf(file, "P6\n%u %u\n255\n", m_dump_width, m_dump_height);
+		std::fwrite(rgb.data(), 1, rgb.size(), file);
+		std::fclose(file);
+		LOGF("frame dump written: %s (%ux%u)\n", path, m_dump_width, m_dump_height);
+	}
+	graphics.device.unmapMemory(m_dump_memory);
+	m_dump_written++;
+}
+
 uint64_t Swapchain::Submit(CommandScheduler& scheduler) {
 	EXIT_IF(m_frame_index >= m_image_acquired.size() || m_image_index >= m_render_complete.size());
 	SubmitInfo submit;
@@ -860,6 +1037,7 @@ Swapchain::Status Swapchain::Present() {
 			return Status::SurfaceLost;
 		default: EXIT("vkQueuePresentKHR failed: %s\n", vk::to_string(result).c_str());
 	}
+	FlushFrameDump();
 	m_frame_index = (m_frame_index + 1u) % static_cast<uint32_t>(m_images.size());
 	return Status::Success;
 }

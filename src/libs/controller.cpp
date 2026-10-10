@@ -16,7 +16,9 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
 
@@ -1059,6 +1061,42 @@ int KYTY_SYSV_ABI PadIsRemoteController(int handle, bool* is_remote) {
 	return OK;
 }
 
+// TEMP (headless debugging): synthesize a controller when KYTY_FAKE_PAD is set
+// so a game that waits for a button press can be advanced without a real pad.
+static bool FakePadEnabled() {
+	static const bool on = std::getenv("KYTY_FAKE_PAD") != nullptr;
+	return on;
+}
+
+static void FakePadApply(ControllerState* state, bool* connected, int* connected_count) {
+	if (!FakePadEnabled()) {
+		return;
+	}
+	*connected       = true;
+	*connected_count = 1;
+	if (state != nullptr) {
+		const auto ms =
+		    std::chrono::duration_cast<std::chrono::milliseconds>(
+		        std::chrono::steady_clock::now().time_since_epoch())
+		        .count();
+		// <20s  : pulse CROSS to clear the "PRESS X TO START" title screen.
+		// >=30s : DOWN then CROSS every 4s, i.e. select "GO OFFLINE" on the
+		//         "Connection Failed" dialog.
+		if (ms < 20000) {
+			if ((ms % 1000) < 250) {
+				state->buttons |= PAD_BUTTON_CROSS;
+			}
+		} else if (ms >= 30000) {
+			const auto phase = ms % 4000;
+			if (phase < 300) {
+				state->buttons |= PAD_BUTTON_DOWN;
+			} else if (phase >= 700 && phase < 1000) {
+				state->buttons |= PAD_BUTTON_CROSS;
+			}
+		}
+	}
+}
+
 int KYTY_SYSV_ABI PadReadState(int handle, PadData* data) {
 	PRINT_NAME();
 
@@ -1074,6 +1112,7 @@ int KYTY_SYSV_ABI PadReadState(int handle, PadData* data) {
 	ControllerState state;
 
 	g_controller->ReadState(&state, &connected, &connected_count);
+	FakePadApply(&state, &connected, &connected_count);
 
 	pad_fill_data(data, state, connected, connected_count);
 
@@ -1105,6 +1144,8 @@ int KYTY_SYSV_ABI PadRead(int handle, PadData* data, int num) {
 		}
 		ret_num = 1;
 	}
+
+	FakePadApply(&states[0], &connected, &connected_count);
 
 	for (int i = 0; i < ret_num; i++) {
 		pad_fill_data(&data[i], states[i], connected, connected_count);

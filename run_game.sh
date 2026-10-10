@@ -25,4 +25,5 @@ fi
 
 #exec "$EMULATOR" --game "$GAME" --game-patch $PATCH
 #exec "$EMULATOR" --game "$GAME"
-exec "$EMULATOR" --game "$GAME" --skip-notice-screen 1 --playgo-hack --amd-cpu
+#exec "$EMULATOR" --game "$GAME" --skip-notice-screen 1 --playgo-hack --amd-cpu
+exec "$EMULATOR" --game "$GAME" --amd-cpu --game-patch ./_Patches/PPSA01687.json

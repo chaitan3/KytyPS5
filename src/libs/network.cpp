@@ -38,6 +38,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
@@ -3574,7 +3575,18 @@ static HostNetworkInfo QueryHostNetworkInfo() {
 #endif
 }
 
+// TEMP (headless testing): KYTY_NETCTL_CONNECTED forces the network-control
+// layer to report an obtained IP, to see how games behave when they believe the
+// console is online. Debug-only.
+static bool NetCtlForceConnected() {
+	static const bool on = std::getenv("KYTY_NETCTL_CONNECTED") != nullptr;
+	return on;
+}
+
 static bool NetCtlConnected() {
+	if (NetCtlForceConnected()) {
+		return true;
+	}
 	if (!g_net_ctl_status_initialized.load()) {
 		g_net_ctl_connected          = false;
 		g_net_ctl_status_initialized = true;
@@ -3587,9 +3599,9 @@ static bool NetCtlConnected() {
 int KYTY_SYSV_ABI NetCtlInit() {
 	PRINT_NAME();
 
-	g_net_ctl_connected          = false;
+	g_net_ctl_connected          = NetCtlForceConnected();
 	g_net_ctl_status_initialized = true;
-	LOGF("\t host network connected = false (forced offline)\n");
+	LOGF("\t host network connected = %s\n", g_net_ctl_connected.load() ? "true" : "false");
 
 	return OK;
 }
@@ -3781,6 +3793,17 @@ namespace NpManager {
 
 LIB_NAME("NpManager", "NpManager");
 
+// TEMP (headless testing): KYTY_NP_SIGNED_IN makes the NP layer report a
+// signed-in, reachable PSN user so the game reaches the online-services stage.
+// Not for upstream.
+static bool NpSignedInEnabled() {
+	static const bool on = [] {
+		const char* value = std::getenv("KYTY_NP_SIGNED_IN");
+		return value != nullptr && std::strcmp(value, "0") != 0;
+	}();
+	return on;
+}
+
 struct NpTitleId {
 	char    id[12 + 1];
 	uint8_t padding[3];
@@ -3927,6 +3950,21 @@ static int np_complete_signed_out_locked(NpRequest* request) {
 	return (request->async ? OK : np_error_signed_out);
 }
 
+// TEMP (headless testing): complete a request successfully (see NpSignedInEnabled).
+static int np_complete_ok_locked(NpRequest* request) {
+	if (request->state == NpRequestState::Complete) {
+		request->result = np_error_invalid_argument;
+		return np_error_invalid_argument;
+	}
+	if (request->state == NpRequestState::Aborted) {
+		request->result = np_error_aborted;
+		return np_error_aborted;
+	}
+	request->state  = NpRequestState::Complete;
+	request->result = OK;
+	return OK;
+}
+
 int KYTY_SYSV_ABI NpCheckCallback() {
 	PRINT_NAME();
 
@@ -3938,7 +3976,8 @@ int KYTY_SYSV_ABI NpCheckCallback() {
 		}
 	}
 	for (const auto& entry: pending) {
-		entry.callback(Config::GetUserId(), np_state_signed_out, entry.userdata);
+		entry.callback(Config::GetUserId(), NpSignedInEnabled() ? 2u : np_state_signed_out,
+		               entry.userdata);
 	}
 
 	return OK;
@@ -4038,6 +4077,11 @@ int KYTY_SYSV_ABI NpGetNpId(int user_id, NpId* np_id) {
 	// np_id->handle.term = 0;
 	std::memset(np_id, 0, sizeof(*np_id));
 
+	if (NpSignedInEnabled()) {
+		std::memcpy(np_id->handle.data, "Kyty", 4);
+		return OK;
+	}
+
 	// return OK;
 	return np_error_signed_out;
 }
@@ -4054,6 +4098,11 @@ int KYTY_SYSV_ABI NpGetOnlineId(int user_id, NpOnlineId* online_id) {
 	// online_id->term = 0;
 	std::memset(online_id, 0, sizeof(*online_id));
 
+	if (NpSignedInEnabled()) {
+		std::memcpy(online_id->data, "Kyty", 4);
+		return OK;
+	}
+
 	// return OK;
 	return np_error_signed_out;
 }
@@ -4067,6 +4116,11 @@ int KYTY_SYSV_ABI NpGetAccountIdA(int user_id, uint64_t* account_id) {
 
 	// *account_id = 0x00000000feedfaceull;
 	*account_id = 0;
+
+	if (NpSignedInEnabled()) {
+		*account_id = 0x00000000feedfaceull;
+		return OK;
+	}
 
 	// return OK;
 	return np_error_signed_out;
@@ -4222,6 +4276,10 @@ int KYTY_SYSV_ABI NpCheckNpAvailability(int req_id, const char* user, void* resu
 		return np_error_request_not_found;
 	}
 
+	if (NpSignedInEnabled()) {
+		return np_complete_ok_locked(request);
+	}
+
 	// return OK;
 	return np_complete_signed_out_locked(request);
 }
@@ -4243,6 +4301,10 @@ int KYTY_SYSV_ABI NpCheckNpReachability(int req_id, int user_id) {
 	auto* request = np_get_request_locked(req_id);
 	if (request == nullptr) {
 		return np_error_request_not_found;
+	}
+
+	if (NpSignedInEnabled()) {
+		return np_complete_ok_locked(request);
 	}
 
 	// return OK;
@@ -4329,7 +4391,7 @@ int KYTY_SYSV_ABI NpGetState(int user_id, uint32_t* state) {
 
 	LOGF("\t user_id = %d\n", user_id);
 
-	*state = np_state_signed_out;
+	*state = NpSignedInEnabled() ? 2u : np_state_signed_out;
 
 	return OK;
 }
@@ -4344,7 +4406,7 @@ int KYTY_SYSV_ABI NpGetNpReachabilityState(int user_id, uint32_t* state) {
 	LOGF("\t user_id = %d\n", user_id);
 
 	// *state = 2; // SCE_NP_REACHABILITY_STATE_REACHABLE
-	*state = 0; // SCE_NP_REACHABILITY_STATE_UNAVAILABLE
+	*state = NpSignedInEnabled() ? 2u : 0u; // 2 = REACHABLE, 0 = UNAVAILABLE
 
 	return OK;
 }
@@ -4358,7 +4420,7 @@ int KYTY_SYSV_ABI NpHasSignedUp(int user_id, bool* has_signed_up) {
 
 	LOGF("\t user_id = %d\n", user_id);
 
-	*has_signed_up = false;
+	*has_signed_up = NpSignedInEnabled();
 
 	return OK;
 }

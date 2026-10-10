@@ -14,6 +14,185 @@
                     "on": "488b05e32fb408803800eb9b"
                 }
             ]
+        },
+        {
+            "name": "Skip online-subsystem teardown null-deref (0x900ef005a)",
+            "enabled": true,
+            "memory": [
+                {
+                    "offset": "0x900ef0045",
+                    "off": "0f84d3000000",
+                    "on": "e9d400000090"
+                }
+            ]
+        },
+        {
+            "name": "Force per-user NP state to signed-in (skip PSN sign-in gate)",
+            "enabled": false,
+            "memory": [
+                {
+                    "offset": "0x900623afa",
+                    "off": "b801000000",
+                    "on": "b802000000"
+                },
+                {
+                    "offset": "0x900623b06",
+                    "off": "83d000",
+                    "on": "909090"
+                }
+            ]
+        },
+        {
+            "name": "Complete online task poll 1jwopmVYLvw (skip waiting)",
+            "enabled": true,
+            "memory": [
+                {
+                    "offset": "0x90063ecce",
+                    "off": "e8ed57f50184c07517",
+                    "on": "e8ed57f50184c0eb17"
+                }
+            ]
+        },
+        {
+            "name": "Complete online task poll ELxlNxdGrgo (skip waiting)",
+            "enabled": true,
+            "memory": [
+                {
+                    "offset": "0x90063e7ee",
+                    "off": "e87d5bf50184c07517",
+                    "on": "e87d5bf50184c0eb17"
+                }
+            ]
+        },
+        {
+            "name": "Complete all online task polls (broad, skip waiting)",
+            "enabled": true,
+            "memory": [
+                {
+                    "offset": "0x900626f4c",
+                    "off": "e85fb3f60184c0759b",
+                    "on": "e85fb3f60184c0eb9b"
+                },
+                {
+                    "offset": "0x90063a7f1",
+                    "off": "e80a91f50184c07517",
+                    "on": "e80a91f50184c0eb17"
+                },
+                {
+                    "offset": "0x90063a9c1",
+                    "off": "e8aa8ff50184c07517",
+                    "on": "e8aa8ff50184c0eb17"
+                },
+                {
+                    "offset": "0x90063abda",
+                    "off": "e8118ef50184c07517",
+                    "on": "e8118ef50184c0eb17"
+                },
+                {
+                    "offset": "0x90063b9ba",
+                    "off": "e83180f50184c07517",
+                    "on": "e83180f50184c0eb17"
+                },
+                {
+                    "offset": "0x90063c7be",
+                    "off": "e82d72f50184c07517",
+                    "on": "e82d72f50184c0eb17"
+                },
+                {
+                    "offset": "0x90063c981",
+                    "off": "e86a70f50184c07517",
+                    "on": "e86a70f50184c0eb17"
+                },
+                {
+                    "offset": "0x90063d5d1",
+                    "off": "e83a6af50184c07517",
+                    "on": "e83a6af50184c0eb17"
+                },
+                {
+                    "offset": "0x90063d7d1",
+                    "off": "e81a62f50184c07517",
+                    "on": "e81a62f50184c0eb17"
+                },
+                {
+                    "offset": "0x90063d9ae",
+                    "off": "e83d60f50184c07517",
+                    "on": "e83d60f50184c0eb17"
+                },
+                {
+                    "offset": "0x90063e1be",
+                    "off": "e8bd60f50184c07517",
+                    "on": "e8bd60f50184c0eb17"
+                },
+                {
+                    "offset": "0x90063e981",
+                    "off": "e85a5af50184c07517",
+                    "on": "e85a5af50184c0eb17"
+                },
+                {
+                    "offset": "0x90063eb3e",
+                    "off": "e80d59f50184c07517",
+                    "on": "e80d59f50184c0eb17"
+                }
+            ]
+        },
+        {
+            "name": "Complete online task poll 4M+tXW+N0+M (skip waiting)",
+            "enabled": true,
+            "memory": [
+                {
+                    "offset": "0x9002f12f1",
+                    "off": "e8cafb290284c07517",
+                    "on": "e8cafb290284c0eb17"
+                }
+            ]
+        },
+        {
+            "name": "Complete online task poll 4M+tXW+N0+M (second task, skip waiting)",
+            "enabled": true,
+            "memory": [
+                {
+                    "offset": "0x900fba21e",
+                    "off": "e89d6c5d0184c07517",
+                    "on": "e89d6c5d0184c0eb17"
+                }
+            ]
+        },
+        {
+            "name": "Ignore NP reachability errors (first-party sign-in task)",
+            "enabled": true,
+            "memory": [
+                {
+                    "offset": "0x90061ba58",
+                    "off": "0f88d5000000",
+                    "on": "909090909090"
+                },
+                {
+                    "offset": "0x90061ba6d",
+                    "off": "0f88c8000000",
+                    "on": "909090909090"
+                },
+                {
+                    "offset": "0x90061ba8f",
+                    "off": "787b",
+                    "on": "9090"
+                }
+            ]
+        },
+        {
+            "name": "Ignore NpHasSignedUp signed-out result",
+            "enabled": true,
+            "memory": [
+                {
+                    "offset": "0x90062dcda",
+                    "off": "787e",
+                    "on": "9090"
+                },
+                {
+                    "offset": "0x90062dce0",
+                    "off": "747c",
+                    "on": "9090"
+                }
+            ]
         }
     ]
 }

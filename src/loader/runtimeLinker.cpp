@@ -135,6 +135,21 @@ static constexpr uint64_t               UNRESOLVED_STUB_PAGE_SIZE      = 4096;
 
 static KYTY_SYSV_ABI uint64_t UnresolvedImportStub(uint64_t record_id);
 
+// TEMP (debug): when KYTY_WEBAPI_ERR is set, unresolved online-services imports
+// (NpCppWebApi_v1 / Http_v1 / Http2_v1) return that value instead of 0, so the
+// game's online login fails quickly instead of waiting forever for a response
+// that will never arrive.
+static uint64_t WebApiErrorValue() {
+	static const uint64_t value = []() -> uint64_t {
+		const char* text = std::getenv("KYTY_WEBAPI_ERR");
+		if (text == nullptr) {
+			return 0;
+		}
+		return static_cast<uint64_t>(std::strtoull(text, nullptr, 0));
+	}();
+	return value;
+}
+
 static bool PatchGuestMemory64(uint64_t vaddr, uint64_t value) {
 	auto* ptr     = reinterpret_cast<uint64_t*>(vaddr);
 	bool  changed = (*ptr != value);
@@ -200,10 +215,11 @@ static uint64_t RegisterStubbedImport(uint32_t index, const Program* program,
 
 static KYTY_SYSV_ABI uint64_t UnresolvedImportStub(uint64_t record_id) {
 	const auto log_index = g_unresolved_stub_call_log_count.fetch_add(1);
-	if (log_index < 1024) {
+	if (log_index < 200000) {
 		if (record_id < g_stubbed_imports.size()) {
 			const auto& record = g_stubbed_imports[record_id];
-			printf("Unresolved import stub called: %s\n", record.name.c_str());
+			printf("Unresolved import stub called: %s patch=0x%016" PRIx64 "\n",
+			       record.name.c_str(), record.patch_vaddr);
 			LOGF("Unresolved import stub called [%u]: patch_vaddr=0x%016" PRIx64
 			     " jmprela_index=%" PRIu32 " symbol=%s type=%s bind=%s program=%s\n",
 			     log_index, record.patch_vaddr, record.index, record.name.c_str(),
@@ -213,6 +229,14 @@ static KYTY_SYSV_ABI uint64_t UnresolvedImportStub(uint64_t record_id) {
 			printf("Unresolved import stub called: <bad-record>\n");
 			LOGF("Unresolved import stub called [%u]: record_id=%" PRIu64 " symbol=<bad-record>\n",
 			     log_index, record_id);
+		}
+	}
+	if (record_id < g_stubbed_imports.size()) {
+		const auto& name = g_stubbed_imports[record_id].name;
+		if (name.find("NpCppWebApi") != std::string::npos ||
+		    name.find("Http_v1") != std::string::npos ||
+		    name.find("Http2_v1") != std::string::npos) {
+			return WebApiErrorValue();
 		}
 	}
 	return 0;

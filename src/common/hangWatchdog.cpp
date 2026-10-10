@@ -221,6 +221,39 @@ std::string FormatSlot(size_t index) {
 	return text;
 }
 
+// TEMP (connection-state debugging): sample a few guest regions every heartbeat
+// and log byte-level changes, to find which state corresponds to the frontend
+// stall. Reads guest memory directly (identity-mapped into the host process).
+void SampleGuestState() {
+	struct Entry {
+		const char* name;
+		uint64_t    address;
+	};
+	static const Entry kEntries[] = {
+	    {"np0", 0x9060c9310ull},  {"np1", 0x9060c9314ull},
+	    {"np2", 0x9060c9318ull},  {"np3", 0x9060c931cull},
+	    {"av0", 0x9060c9320ull},  {"av1", 0x9060c9324ull},
+	    {"npc", 0x9060c9330ull},  {"netctl", 0x9060c9360ull},
+	    {"gs", 0x9096b03c8ull},   {"p1", 0x900623afaull},
+	    {"p2", 0x900623b06ull},
+	};
+	static constexpr size_t kCount = sizeof(kEntries) / sizeof(kEntries[0]);
+	static uint32_t         prev[kCount] = {};
+	static bool             first       = true;
+	std::string             changes;
+	for (size_t i = 0; i < kCount; i++) {
+		const auto value = *reinterpret_cast<const volatile uint32_t*>(kEntries[i].address);
+		if (first || value != prev[i]) {
+			changes += fmt::format(" {}=0x{:x}", kEntries[i].name, value);
+			prev[i] = value;
+		}
+	}
+	first = false;
+	if (!changes.empty()) {
+		Log::WriteToConsoleAndLog(fmt::format("[state]{}\n", changes));
+	}
+}
+
 void MonitorLoop() {
 	auto     last_progress  = g_progress.load();
 	auto     last_change    = std::chrono::steady_clock::now();
@@ -252,6 +285,7 @@ void MonitorLoop() {
 				Log::WriteToConsoleAndLog(
 				    fmt::format("[watchdog heartbeat] {}", FormatSlot(static_cast<size_t>(primary))));
 			}
+			SampleGuestState();
 		}
 
 		const auto progress = g_progress.load();

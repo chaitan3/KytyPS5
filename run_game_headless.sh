@@ -33,6 +33,13 @@ export KYTY_ALLOW_MISSING_BARYCENTRIC=1
 export KYTY_WATCHDOG_HEARTBEAT=1
 export KYTY_TRACE_SLEEP=1
 
+# Debug-only scaffolding for headless iteration (remove before upstreaming):
+#  - KYTY_FAKE_PAD      : synthesize a controller so menus can be advanced.
+#  - KYTY_NP_SIGNED_IN  : NP layer reports a signed-in user so the game reaches
+#                         the online-services (Demonware) stage without a real PSN.
+export KYTY_FAKE_PAD=1
+export KYTY_NP_SIGNED_IN="${KYTY_NP_SIGNED_IN:-1}"
+
 ulimit -c unlimited 2>/dev/null || true
 
 if [ ! -f "$EMULATOR" ]; then
@@ -64,6 +71,7 @@ echo ""
 
 set +e
 "$EMULATOR" --game "$GAME" \
+    --game-patch ./_Patches/PPSA01687.json \
     --printf-direction File --printf-output-file "$LOG" \
     --shader-log-direction File --shader-log-folder "$SHADER_LOG_FOLDER" \
     --graphics-debug-dump true \
