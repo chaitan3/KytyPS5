@@ -3810,6 +3810,13 @@ namespace NpManager {
 
 LIB_NAME("NpManager", "NpManager");
 
+// When the user opts into host networking the console is reported as having a
+// signed-in NP user. Without this, games that require PSN sign-in stop at a
+// "connection failed" dialog instead of falling back to their offline menus.
+static bool NpSignedInEnabled() {
+	return Config::IsNetworkConnected();
+}
+
 struct NpTitleId {
 	char    id[12 + 1];
 	uint8_t padding[3];
@@ -3956,6 +3963,21 @@ static int np_complete_signed_out_locked(NpRequest* request) {
 	return (request->async ? OK : np_error_signed_out);
 }
 
+// Complete a request successfully when the NP user is reported signed-in.
+static int np_complete_ok_locked(NpRequest* request) {
+	if (request->state == NpRequestState::Complete) {
+		request->result = np_error_invalid_argument;
+		return np_error_invalid_argument;
+	}
+	if (request->state == NpRequestState::Aborted) {
+		request->result = np_error_aborted;
+		return np_error_aborted;
+	}
+	request->state  = NpRequestState::Complete;
+	request->result = OK;
+	return OK;
+}
+
 int KYTY_SYSV_ABI NpCheckCallback() {
 	PRINT_NAME();
 
@@ -3967,7 +3989,8 @@ int KYTY_SYSV_ABI NpCheckCallback() {
 		}
 	}
 	for (const auto& entry: pending) {
-		entry.callback(Config::GetUserId(), np_state_signed_out, entry.userdata);
+		entry.callback(Config::GetUserId(), NpSignedInEnabled() ? 2u : np_state_signed_out,
+		               entry.userdata);
 	}
 
 	return OK;
@@ -4067,6 +4090,11 @@ int KYTY_SYSV_ABI NpGetNpId(int user_id, NpId* np_id) {
 	// np_id->handle.term = 0;
 	std::memset(np_id, 0, sizeof(*np_id));
 
+	if (NpSignedInEnabled()) {
+		std::memcpy(np_id->handle.data, "Kyty", 4);
+		return OK;
+	}
+
 	// return OK;
 	return np_error_signed_out;
 }
@@ -4083,6 +4111,11 @@ int KYTY_SYSV_ABI NpGetOnlineId(int user_id, NpOnlineId* online_id) {
 	// online_id->term = 0;
 	std::memset(online_id, 0, sizeof(*online_id));
 
+	if (NpSignedInEnabled()) {
+		std::memcpy(online_id->data, "Kyty", 4);
+		return OK;
+	}
+
 	// return OK;
 	return np_error_signed_out;
 }
@@ -4096,6 +4129,11 @@ int KYTY_SYSV_ABI NpGetAccountIdA(int user_id, uint64_t* account_id) {
 
 	// *account_id = 0x00000000feedfaceull;
 	*account_id = 0;
+
+	if (NpSignedInEnabled()) {
+		*account_id = 0x00000000feedfaceull;
+		return OK;
+	}
 
 	// return OK;
 	return np_error_signed_out;
@@ -4251,6 +4289,10 @@ int KYTY_SYSV_ABI NpCheckNpAvailability(int req_id, const char* user, void* resu
 		return np_error_request_not_found;
 	}
 
+	if (NpSignedInEnabled()) {
+		return np_complete_ok_locked(request);
+	}
+
 	// return OK;
 	return np_complete_signed_out_locked(request);
 }
@@ -4272,6 +4314,10 @@ int KYTY_SYSV_ABI NpCheckNpReachability(int req_id, int user_id) {
 	auto* request = np_get_request_locked(req_id);
 	if (request == nullptr) {
 		return np_error_request_not_found;
+	}
+
+	if (NpSignedInEnabled()) {
+		return np_complete_ok_locked(request);
 	}
 
 	// return OK;
@@ -4358,7 +4404,7 @@ int KYTY_SYSV_ABI NpGetState(int user_id, uint32_t* state) {
 
 	LOGF("\t user_id = %d\n", user_id);
 
-	*state = np_state_signed_out;
+	*state = NpSignedInEnabled() ? 2u : np_state_signed_out;
 
 	return OK;
 }
@@ -4373,7 +4419,7 @@ int KYTY_SYSV_ABI NpGetNpReachabilityState(int user_id, uint32_t* state) {
 	LOGF("\t user_id = %d\n", user_id);
 
 	// *state = 2; // SCE_NP_REACHABILITY_STATE_REACHABLE
-	*state = 0; // SCE_NP_REACHABILITY_STATE_UNAVAILABLE
+	*state = NpSignedInEnabled() ? 2u : 0u; // 2 = REACHABLE, 0 = UNAVAILABLE
 
 	return OK;
 }
@@ -4387,7 +4433,7 @@ int KYTY_SYSV_ABI NpHasSignedUp(int user_id, bool* has_signed_up) {
 
 	LOGF("\t user_id = %d\n", user_id);
 
-	*has_signed_up = false;
+	*has_signed_up = NpSignedInEnabled();
 
 	return OK;
 }
