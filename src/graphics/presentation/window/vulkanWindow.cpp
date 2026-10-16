@@ -25,6 +25,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <fmt/format.h>
 #include <memory>
@@ -147,6 +148,15 @@ static uint32_t VulkanFindQueueFamily(vk::PhysicalDevice device, vk::SurfaceKHR 
 	return static_cast<uint32_t>(-1);
 }
 
+// Debug escape hatch: allow running on Vulkan drivers that do not expose
+// VK_KHR_fragment_shader_barycentric (Mesa lavapipe, SwiftShader, ...), so the
+// emulator can be driven headlessly. The pixel-shader recompiler detects the same
+// variable and drops its barycentric path, so rendering is approximate, not correct.
+static bool AllowMissingBarycentric() {
+	static const bool allow = std::getenv("KYTY_ALLOW_MISSING_BARYCENTRIC") != nullptr;
+	return allow;
+}
+
 // On failure out_device is null and out_rejections says why each device was skipped.
 // NOLINTNEXTLINE(readability-function-cognitive-complexity)
 static void VulkanFindPhysicalDevice(vk::Instance instance, vk::SurfaceKHR surface,
@@ -266,7 +276,10 @@ static void VulkanFindPhysicalDevice(vk::Instance instance, vk::SurfaceKHR surfa
 #endif
 #if !defined(__APPLE__)
 		check_feature(device_features2.features.depthClamp, "depthClamp");
-		check_feature(fragment_barycentric.fragmentShaderBarycentric, "fragmentShaderBarycentric");
+		if (!AllowMissingBarycentric()) {
+			check_feature(fragment_barycentric.fragmentShaderBarycentric,
+			              "fragmentShaderBarycentric");
+		}
 #endif
 
 		check_feature(features12.samplerMirrorClampToEdge, "samplerMirrorClampToEdge",
@@ -606,14 +619,15 @@ static vk::Device VulkanCreateDevice(GraphicContext& graphics,
 	// }
 
 	vk::PhysicalDeviceRobustness2FeaturesEXT robustness2 {};
-#if defined(__APPLE__)
-	robustness2.pNext = &features12;
-#else
 	vk::PhysicalDeviceFragmentShaderBarycentricFeaturesKHR fragment_barycentric {};
 	fragment_barycentric.pNext                     = &features12;
 	fragment_barycentric.fragmentShaderBarycentric = VK_TRUE;
-	robustness2.pNext                              = &fragment_barycentric;
-#endif
+	// Only chain the barycentric feature when its extension was actually enabled. This is
+	// always false on macOS and when KYTY_ALLOW_MISSING_BARYCENTRIC is set (lavapipe).
+	const bool barycentric_ext_enabled =
+	    HasExtension(device_extensions, VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME);
+	robustness2.pNext = barycentric_ext_enabled ? static_cast<void*>(&fragment_barycentric)
+	                                            : static_cast<void*>(&features12);
 	robustness2.robustBufferAccess2 = supported_robustness2.robustBufferAccess2;
 	robustness2.robustImageAccess2  = supported_robustness2.robustImageAccess2;
 	robustness2.nullDescriptor      = VK_TRUE;
@@ -966,7 +980,9 @@ void WindowContext::CreateVulkan() {
 #else
 	device_extensions.push_back(VK_EXT_DEPTH_CLIP_ENABLE_EXTENSION_NAME);
 	device_extensions.push_back(VK_EXT_COLOR_WRITE_ENABLE_EXTENSION_NAME);
-	device_extensions.push_back(VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME);
+	if (!AllowMissingBarycentric()) {
+		device_extensions.push_back(VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME);
+	}
 #endif
 
 #ifdef KYTY_ENABLE_DEBUG_PRINTF

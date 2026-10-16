@@ -1,7 +1,7 @@
 #!/bin/sh
 set -e
 
-GAME="/mnt/nas/Games/emulators/ps5/Demon Souls/PPSA01341-app0"
+#GAME="/mnt/nas/Games/emulators/ps5/Demon Souls/PPSA01341-app0"
 #GAME="/mnt/nas/Games/emulators/ps5/Ghost of Yotei/PPSA26344-app0"
 #GAME="/mnt/nas/Games/emulators/ps5/Astro Bot/PPSA21564-app0"
 GAME="/mnt/nas/Games/emulators/ps5/Call of Duty Vanguard/PPSA01687-app"
@@ -26,4 +26,5 @@ fi
 #exec "$EMULATOR" --game "$GAME" --game-patch $PATCH
 #exec "$EMULATOR" --game "$GAME"
 #exec "$EMULATOR" --game "$GAME" --skip-notice-screen 1 --playgo-hack --amd-cpu
-exec "$EMULATOR" --game "$GAME" --amd-cpu --game-patch ./_Patches/PPSA01687.json
+#exec "$EMULATOR" --game "$GAME" --amd-cpu --game-patch ./_Patches/PPSA01687.json
+exec "$EMULATOR" --game "$GAME" --network-connected true

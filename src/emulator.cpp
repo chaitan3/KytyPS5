@@ -232,6 +232,13 @@ void Run(const RunOptions& options) {
 
 	LoadElf(options.elf);
 
+	// TEMP (debug): dump the decrypted guest ELF for static analysis, then stop.
+	if (const char* dump = std::getenv("KYTY_DUMP_ELF"); dump != nullptr && dump[0] != '\0') {
+		rt->SaveMainProgram(dump);
+		Log::WriteToConsoleAndLog(fmt::format("Dumped guest ELF to {}\n", dump));
+		std::quick_exit(0);
+	}
+
 	Execute(options.game_patch);
 }
 

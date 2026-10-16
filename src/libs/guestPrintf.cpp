@@ -15,7 +15,10 @@
 #include "libs/vaContext.h"
 
 #include <cfloat>
+#include <chrono>
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <vector>
 
 namespace Libs {
@@ -777,6 +780,18 @@ static int kyty_printf_internal(bool sn, char* sn_s, size_t sn_n, const char* fo
 		EXIT_NOT_IMPLEMENTED(static_cast<size_t>(s) >= sn_n);
 	} else {
 		LOGF_COLOR(Log::Color::BrightMagenta, "%s", buffer.data());
+		// TEMP (debug): also append guest printf output to a file so it survives
+		// a killed run and is easy to grep.
+		if (const char* path = std::getenv("KYTY_GUEST_PRINTF_FILE"); path != nullptr) {
+			if (FILE* f = std::fopen(path, "a"); f != nullptr) {
+				const auto now = std::chrono::steady_clock::now().time_since_epoch();
+				const auto ms =
+				    std::chrono::duration_cast<std::chrono::milliseconds>(now).count();
+				std::fprintf(f, "[%lld] ", static_cast<long long>(ms));
+				std::fputs(buffer.data(), f);
+				std::fclose(f);
+			}
+		}
 	}
 
 	// return written chars without terminating \0

@@ -1213,6 +1213,24 @@ void RuntimeLinker::SaveMainProgram(const std::filesystem::path& elf_name) {
 
 	Common::LockGuard lock(m_mutex);
 
+	// TEMP (debug): dump the whole main-program memory image for static analysis.
+	if (const char* mem = std::getenv("KYTY_DUMP_MEM"); mem != nullptr && mem[0] != '\0') {
+		for (const auto* p: m_programs) {
+			if (p->elf != nullptr && !p->elf->IsShared() && p->base_vaddr != 0) {
+				FILE* f = std::fopen(mem, "wb");
+				if (f != nullptr) {
+					std::fwrite(reinterpret_cast<const void*>(p->base_vaddr), 1,
+					            p->mapped_size, f);
+					std::fclose(f);
+					LOGF("dumped main program memory %s base=0x%016" PRIx64
+					     " size=0x%016" PRIx64 "\n",
+					     mem, p->base_vaddr, p->mapped_size);
+				}
+				break;
+			}
+		}
+	}
+
 	for (const auto* p: m_programs) {
 		EXIT_IF(p->elf == nullptr);
 

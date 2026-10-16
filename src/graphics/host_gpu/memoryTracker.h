@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstdlib>
 #include <memory>
 #include <mutex>
 #include <type_traits>
@@ -38,6 +39,11 @@ public:
 	void InvalidateRegion(uint64_t vaddr, uint64_t size, Flush&& on_flush) noexcept {
 		static_assert(std::is_invocable_v<Flush&>);
 		CheckNotInUploadCallback();
+		// TEMP (headless debugging): skip a nested operation instead of deadlocking on
+		// the region lock when KYTY_ALLOW_UPLOAD_REENTRY is set (see the guard above).
+		if (s_upload_owner == this) {
+			return;
+		}
 
 		Iterate<false>(vaddr, size, [&](RegionManager* manager, uint64_t offset, uint64_t bytes) {
 			const bool should_flush = [&] {
@@ -71,6 +77,10 @@ public:
 	void ForEachDownloadRange(uint64_t vaddr, uint64_t size, Func&& func) {
 		static_assert(std::is_nothrow_invocable_v<Func&, uint64_t, uint64_t>);
 		CheckNotInUploadCallback();
+		// TEMP (headless debugging): see the upload-reentry guard above.
+		if (s_upload_owner == this) {
+			return;
+		}
 		Iterate<false>(vaddr, size, [&](RegionManager* manager, uint64_t offset, uint64_t bytes) {
 			std::scoped_lock lock(manager->lock);
 			const auto       address = manager->GetCpuAddr() + offset;
@@ -87,6 +97,10 @@ public:
 		static_assert(std::is_nothrow_invocable_v<RangeFunc&, uint64_t, uint64_t>);
 		static_assert(std::is_nothrow_invocable_v<UploadFunc&>);
 		CheckNotInUploadCallback();
+		// TEMP (headless debugging): see the upload-reentry guard above.
+		if (s_upload_owner == this) {
+			return;
+		}
 		const auto* previous_upload_owner = std::exchange(s_upload_owner, this);
 		Iterate<true>(vaddr, size, [&](RegionManager* manager, uint64_t offset, uint64_t bytes) {
 			manager->lock.lock();
@@ -114,6 +128,13 @@ private:
 
 	void CheckNotInUploadCallback() const noexcept {
 		if (s_upload_owner == this) {
+			// TEMP (headless debugging): lavapipe triggers nested uploads that the tracker
+			// normally forbids to avoid a self-deadlock on a region lock. With
+			// KYTY_ALLOW_UPLOAD_REENTRY the nested operation is skipped instead of aborting.
+			static const bool allow = std::getenv("KYTY_ALLOW_UPLOAD_REENTRY") != nullptr;
+			if (allow) {
+				return;
+			}
 			EXIT("memory tracker re-entered from upload callback\n");
 		}
 	}

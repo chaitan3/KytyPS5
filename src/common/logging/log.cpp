@@ -126,6 +126,9 @@ static void WriteImpl(std::string_view text, fmt::text_style style = {}) {
 		} else {
 			logger->log(spdlog::level::info, spdlog::string_view_t(text.data(), text.size()));
 		}
+		// TEMP (debug): flush per write so a killed process (pkill) still leaves a
+		// complete trace on disk instead of losing the tail in the sink buffer.
+		logger->flush();
 	}
 }
 

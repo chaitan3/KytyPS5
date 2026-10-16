@@ -16,7 +16,9 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
 #include <vector>
 
@@ -1214,6 +1216,38 @@ int KYTY_SYSV_ABI PadIsRemoteController(int handle, bool* is_remote) {
 	return OK;
 }
 
+// TEMP (headless debugging): synthesize a controller when KYTY_FAKE_PAD is set
+// so a game that waits for a button press can be advanced without a real pad.
+static bool FakePadEnabled() {
+	static const bool on = std::getenv("KYTY_FAKE_PAD") != nullptr;
+	return on;
+}
+
+static void FakePadApply(ControllerState* state, bool* connected, int* connected_count) {
+	if (!FakePadEnabled()) {
+		return;
+	}
+	*connected       = true;
+	*connected_count = 1;
+	if (state != nullptr) {
+		// Press CROSS every ~2s to confirm menus; every ~40s also press DOWN
+		// first so the "GO OFFLINE" option on the connection-failed dialog is
+		// selected. CROSS dominates so the main menu keeps CAMPAIGN focused.
+		const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+		                    std::chrono::steady_clock::now().time_since_epoch())
+		                    .count();
+		const auto cycle = ms % 40000;
+		const auto sub   = ms % 2000;
+		if (cycle < 300) {
+			state->buttons |= PAD_BUTTON_DOWN;
+		} else if (cycle >= 600 && cycle < 900) {
+			state->buttons |= PAD_BUTTON_CROSS;
+		} else if (sub < 300) {
+			state->buttons |= PAD_BUTTON_CROSS;
+		}
+	}
+}
+
 int KYTY_SYSV_ABI PadReadState(int handle, PadData* data) {
 	PRINT_NAME();
 
@@ -1229,6 +1263,8 @@ int KYTY_SYSV_ABI PadReadState(int handle, PadData* data) {
 	ControllerState state;
 
 	g_controller->ReadState(&state, &connected, &connected_count);
+
+	FakePadApply(&state, &connected, &connected_count);
 
 	pad_fill_data(data, state, connected, connected_count);
 
@@ -1260,6 +1296,8 @@ int KYTY_SYSV_ABI PadRead(int handle, PadData* data, int num) {
 		}
 		ret_num = 1;
 	}
+
+	FakePadApply(&states[0], &connected, &connected_count);
 
 	for (int i = 0; i < ret_num; i++) {
 		pad_fill_data(&data[i], states[i], connected, connected_count);
