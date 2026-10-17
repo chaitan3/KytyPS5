@@ -218,6 +218,8 @@ void TextureCache::RegisterImage(ImageId id) {
 	image.registered = true;
 	image.lru_id     = m_lru_cache.Insert(id, m_gc_tick);
 	m_total_used_memory += image.AccountedSize();
+	m_accounted_memory += image.AccountedSize();
+	++m_registered_images;
 }
 
 void TextureCache::UnregisterImage(ImageId id) {
@@ -242,6 +244,11 @@ void TextureCache::UnregisterImage(ImageId id) {
 		EXIT("TextureCache: image accounting underflow\n");
 	}
 	m_total_used_memory -= accounted;
+	if (accounted > m_accounted_memory) {
+		EXIT("TextureCache: diagnostics accounting underflow\n");
+	}
+	m_accounted_memory -= accounted;
+	--m_registered_images;
 	image.registered = false;
 }
 
@@ -1899,9 +1906,16 @@ void TextureCache::UnmapMemory(uint64_t address, uint64_t size) {
 	}
 }
 
+TextureCache::MemoryStats TextureCache::GetMemoryStats() {
+	std::scoped_lock lock {m_lock};
+	return {m_accounted_memory, m_registered_images, m_last_gc_freed, m_last_gc_freed_bytes};
+}
+
 void TextureCache::RunGarbageCollector() {
 	std::scoped_lock lock {m_lock};
 	const uint64_t   tick = m_gc_tick++;
+	m_last_gc_freed       = 0;
+	m_last_gc_freed_bytes = 0;
 	if (m_graphics.CanReportMemoryUsage()) {
 		m_total_used_memory = m_graphics.GetDeviceMemoryUsage();
 	}
@@ -1942,7 +1956,10 @@ void TextureCache::RunGarbageCollector() {
 					continue;
 				}
 			}
+			const auto freed_bytes = owner->AccountedSize();
 			FreeImage(id);
+			++m_last_gc_freed;
+			m_last_gc_freed_bytes += freed_bytes;
 			if (m_total_used_memory < m_critical_gc_memory && aggressive) {
 				deletions >>= 2;
 				aggressive = false;

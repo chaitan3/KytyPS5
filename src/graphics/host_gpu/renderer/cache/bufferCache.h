@@ -86,6 +86,10 @@ public:
 	}
 	void               RunGarbageCollector();
 
+	// Diagnostics: bytes/counts owned by the cache, independent of device usage.
+	[[nodiscard]] uint64_t GetAccountedMemory() const noexcept { return m_accounted_memory; }
+	[[nodiscard]] uint64_t GetBufferCount() const noexcept { return m_buffer_count; }
+
 private:
 	friend struct BufferCacheTestAccess;
 
@@ -142,6 +146,8 @@ private:
 	StreamBuffer                                      m_device_buffer;
 	TextureCache&                                     m_texture_cache;
 	uint64_t                                          m_total_used_memory  = 0;
+	uint64_t                                          m_accounted_memory   = 0;
+	uint64_t                                          m_buffer_count       = 0;
 	uint64_t m_trigger_gc_memory  = 1ull * 1024 * 1024 * 1024;
 	uint64_t m_critical_gc_memory = 2ull * 1024 * 1024 * 1024;
 	uint64_t m_gc_tick            = 0;

@@ -79,6 +79,16 @@ public:
 	void ProcessDownloadImages();
 	void RunGarbageCollector();
 
+	// Diagnostics: bytes/counts owned by the cache (independent of device usage) and how
+	// much the last collection reclaimed.
+	struct MemoryStats {
+		uint64_t accounted_memory    = 0;
+		uint64_t registered_images   = 0;
+		uint64_t last_gc_freed       = 0;
+		uint64_t last_gc_freed_bytes = 0;
+	};
+	[[nodiscard]] MemoryStats GetMemoryStats();
+
 private:
 	struct MetaDataInfo {
 		enum class Type : uint8_t { CMask, FMask, HTile };
@@ -177,6 +187,10 @@ private:
 	std::unordered_set<ImageId>                       m_download_images;
 	std::map<uint64_t, MetaDataInfo>                  m_surface_metas;
 	uint64_t                                          m_total_used_memory  = 0;
+	uint64_t                                          m_accounted_memory   = 0;
+	uint64_t                                          m_registered_images  = 0;
+	uint64_t                                          m_last_gc_freed      = 0;
+	uint64_t                                          m_last_gc_freed_bytes = 0;
 	uint64_t                                          m_trigger_gc_memory  = 0;
 	uint64_t                                          m_pressure_gc_memory = 1536ull * 1024 * 1024;
 	uint64_t         m_critical_gc_memory     = 3ull * 1024 * 1024 * 1024;

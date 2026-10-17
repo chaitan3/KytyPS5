@@ -7,6 +7,7 @@
 #include "libs/errno.h"
 
 #include <algorithm>
+#include <cinttypes>
 
 namespace Libs::Graphics {
 
@@ -142,6 +143,32 @@ void RenderContext::RunGarbageCollector() {
 	m_texture_cache.ProcessDownloadImages();
 	m_texture_cache.RunGarbageCollector();
 	m_buffer_cache.RunGarbageCollector();
+	LogMemoryDiagnostics();
+}
+
+void RenderContext::LogMemoryDiagnostics() {
+	if (!m_graphics.CanReportMemoryUsage()) {
+		return;
+	}
+	const uint64_t usage  = m_graphics.GetDeviceMemoryUsage();
+	const uint64_t budget = m_graphics.GetTotalMemoryBudget();
+	// Log periodically, and every frame once device-local usage approaches the budget so the
+	// run-up to an allocation failure is visible.
+	const bool tick        = (m_gc_log_counter++ % 30) == 0;
+	const bool near_budget = budget != 0 && usage > budget - budget / 10;
+	if (!tick && !near_budget) {
+		return;
+	}
+	const auto textures = m_texture_cache.GetMemoryStats();
+	LOGF("GPU memory: device=%" PRIu64 " budget=%" PRIu64 " textures=%" PRIu64
+	     " images=%" PRIu64 " buffers=%" PRIu64 "/%" PRIu64 " gc_textures=%" PRIu64
+	     " gc_bytes=%" PRIu64 "\n",
+	     usage, budget, textures.accounted_memory, textures.registered_images,
+	     m_buffer_cache.GetAccountedMemory(), m_buffer_cache.GetBufferCount(),
+	     textures.last_gc_freed, textures.last_gc_freed_bytes);
+	if (tick) {
+		m_graphics.LogMemoryBudget();
+	}
 }
 
 void RenderContext::AddInterruptEq(LibKernel::EventQueue::KernelEqueue eq, int event_id) {
