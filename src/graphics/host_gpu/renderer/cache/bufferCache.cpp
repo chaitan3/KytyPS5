@@ -648,32 +648,37 @@ void BufferCache::RunGarbageCollector() {
 		return;
 	}
 
-	const bool     aggressive = m_total_used_memory >= m_critical_gc_memory;
-	const uint64_t age        = std::min<uint64_t>(aggressive ? 80 : 160, tick);
-	const size_t   limit      = aggressive ? 64 : 32;
+	const bool aggressive = m_total_used_memory >= m_critical_gc_memory;
+	// Reclaim toward the trigger threshold instead of gating on tick age. A streaming burst
+	// can create buffers faster than any age window allows, which leaves the collector with
+	// nothing to free while device memory fills up. Walk the LRU from the least recently used
+	// entry and stop as soon as usage is back under the trigger, so actively used buffers
+	// (touched recently and therefore at the tail) are only reached as a last resort.
+	const size_t clean_limit = aggressive ? 4096 : 1024;
+	const size_t dirty_limit = aggressive ? 128 : 32;
 
 	std::vector<BufferId> dirty_buffers;
-	size_t                retire_count = 0;
-	m_lru_cache.ForEachItemBelow(tick - age, [&](BufferId id) {
+	size_t                clean_freed = 0;
+	m_lru_cache.ForEachItemBelow(tick + 1, [&](BufferId id) {
 		auto& buffer = m_slot_buffers[id];
 		EXIT_IF(buffer.is_deleted);
 		m_memory_tracker.ValidateGpuDirtyOwnership(m_gpu_modified_ranges, buffer.CpuAddress(),
 		                                           buffer.Size(), "garbage collection");
 		const bool dirty = m_memory_tracker.IsRegionGpuModified(buffer.CpuAddress(), buffer.Size());
-		if (dirty && !aggressive) {
-			return false;
-		}
 		if (dirty) {
+			if (!aggressive || dirty_buffers.size() >= dirty_limit) {
+				return false;
+			}
 			EXIT_NOT_IMPLEMENTED(!DownloadBufferMemory<true>(buffer, buffer.CpuAddress(), buffer.Size()));
 			dirty_buffers.push_back(id);
-		} else {
-			m_memory_tracker.UntrackMemory(buffer.CpuAddress(), buffer.Size());
-			const auto freed_bytes = buffer.Size();
-			DeleteBuffer(id);
-			++m_last_gc_freed;
-			m_last_gc_freed_bytes += freed_bytes;
+			return false;
 		}
-		return ++retire_count == limit;
+		m_memory_tracker.UntrackMemory(buffer.CpuAddress(), buffer.Size());
+		const auto freed_bytes = buffer.Size();
+		DeleteBuffer(id);
+		++m_last_gc_freed;
+		m_last_gc_freed_bytes += freed_bytes;
+		return ++clean_freed >= clean_limit || m_total_used_memory <= m_trigger_gc_memory;
 	});
 	if (dirty_buffers.empty()) {
 		return;
