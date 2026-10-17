@@ -95,13 +95,14 @@ public:
 	struct MemoryStats {
 		uint64_t                           accounted_memory    = 0;
 		uint64_t                           buffer_count        = 0;
+		uint64_t                           total_buffers       = 0;
 		uint64_t                           last_gc_freed       = 0;
 		uint64_t                           last_gc_freed_bytes = 0;
 		std::array<uint64_t, kSizeBuckets> size_histogram {};
 	};
 	[[nodiscard]] MemoryStats GetMemoryStats() const noexcept {
-		return {m_accounted_memory, m_buffer_count, m_last_gc_freed, m_last_gc_freed_bytes,
-		        m_size_histogram};
+		return {m_accounted_memory, m_buffer_count, m_slot_buffers.size(), m_last_gc_freed,
+		        m_last_gc_freed_bytes, m_size_histogram};
 	}
 
 private:

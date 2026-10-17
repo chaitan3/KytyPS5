@@ -259,6 +259,11 @@ bool CommandScheduler::HasPendingPriorityOperations() {
 	return !m_priority_operations.empty() || m_priority_active;
 }
 
+uint64_t CommandScheduler::PendingOperationCount() {
+	std::lock_guard lock(m_operation_mutex);
+	return m_pending_operations.size() + m_priority_operations.size();
+}
+
 void CommandScheduler::PriorityOperationsThread(std::stop_token stop) {
 	while (!stop.stop_requested()) {
 		PendingOperation operation;

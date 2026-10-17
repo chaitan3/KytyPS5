@@ -1908,7 +1908,8 @@ void TextureCache::UnmapMemory(uint64_t address, uint64_t size) {
 
 TextureCache::MemoryStats TextureCache::GetMemoryStats() {
 	std::scoped_lock lock {m_lock};
-	return {m_accounted_memory, m_registered_images, m_last_gc_freed, m_last_gc_freed_bytes};
+	return {m_accounted_memory, m_registered_images, m_slot_images.size(), m_last_gc_freed,
+	        m_last_gc_freed_bytes};
 }
 
 void TextureCache::RunGarbageCollector() {

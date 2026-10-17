@@ -84,6 +84,7 @@ public:
 	struct MemoryStats {
 		uint64_t accounted_memory    = 0;
 		uint64_t registered_images   = 0;
+		uint64_t total_images        = 0;
 		uint64_t last_gc_freed       = 0;
 		uint64_t last_gc_freed_bytes = 0;
 	};

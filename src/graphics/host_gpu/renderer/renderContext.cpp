@@ -168,11 +168,14 @@ void RenderContext::LogMemoryDiagnostics() {
 	const auto textures = m_texture_cache.GetMemoryStats();
 	const auto buffers  = m_buffer_cache.GetMemoryStats();
 	LOGF("GPU memory: device=%" PRIu64 " budget=%" PRIu64 " textures=%" PRIu64
-	     " images=%" PRIu64 " buffers=%" PRIu64 "/%" PRIu64 " gc_textures=%" PRIu64
-	     "/%" PRIu64 " gc_buffers=%" PRIu64 "/%" PRIu64 "\n",
+	     " images=%" PRIu64 "/%" PRIu64 " buffers=%" PRIu64 "/%" PRIu64 "/%" PRIu64
+	     " gc_textures=%" PRIu64 "/%" PRIu64 " gc_buffers=%" PRIu64 "/%" PRIu64
+	     " pending=%" PRIu64 "\n",
 	     usage, budget, textures.accounted_memory, textures.registered_images,
-	     buffers.accounted_memory, buffers.buffer_count, textures.last_gc_freed,
-	     textures.last_gc_freed_bytes, buffers.last_gc_freed, buffers.last_gc_freed_bytes);
+	     textures.total_images, buffers.accounted_memory, buffers.buffer_count,
+	     buffers.total_buffers, textures.last_gc_freed, textures.last_gc_freed_bytes,
+	     buffers.last_gc_freed, buffers.last_gc_freed_bytes,
+	     m_command_scheduler.PendingOperationCount());
 	if (tick) {
 		m_graphics.LogMemoryBudget();
 		std::string histogram;
