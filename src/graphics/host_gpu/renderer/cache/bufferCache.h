@@ -85,7 +85,9 @@ public:
 	void               QueueBdaSync(uint64_t vaddr, uint64_t size) {
 		m_memory_tracker.QueueBdaSync(vaddr, size);
 	}
-	void               RunGarbageCollector();
+	// `allow_dirty_downloads` is false for the allocation-time pressure path, where waiting on
+	// the scheduler to publish downloads would risk re-entrancy; clean buffers are still freed.
+	void               RunGarbageCollector(bool allow_dirty_downloads = true);
 
 	// Diagnostics: bytes/counts owned by the cache (independent of device usage), the live
 	// size distribution bucketed by floor(log2(bytes)), and what the last collection freed.

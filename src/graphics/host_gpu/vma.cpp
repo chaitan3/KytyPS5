@@ -128,6 +128,18 @@ uint64_t GraphicContext::GetTotalMemoryBudget() const {
 	return std::max(local, available > system_reserve ? available - system_reserve : uint64_t {0});
 }
 
+bool GraphicContext::ShouldSpillHostMemory(uint64_t size) const {
+	if (!CanReportMemoryUsage()) {
+		return false;
+	}
+	// vmaGetHeapBudgets is a driver call, so sample it periodically rather than per allocation.
+	if ((m_spill_tick++ & 0x1fu) == 0u) {
+		m_spill_usage  = GetDeviceMemoryUsage();
+		m_spill_budget = GetTotalMemoryBudget();
+	}
+	return m_spill_budget != 0 && m_spill_usage + size > m_spill_budget;
+}
+
 bool GraphicContext::CreateImage(const vk::ImageCreateInfo& image_info, VulkanImage& image) {
 	KYTY_PROFILER_FUNCTION();
 	EXIT_IF(allocator == nullptr || image.image != nullptr || image.allocation != nullptr);
@@ -135,10 +147,24 @@ bool GraphicContext::CreateImage(const vk::ImageCreateInfo& image_info, VulkanIm
 	VmaAllocationCreateInfo alloc_info {};
 	alloc_info.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 
+	const auto allocate = [&](vk::Image::CType& native) {
+		image.allocation = nullptr;
+		return static_cast<vk::Result>(vmaCreateImage(
+		    allocator, static_cast<const vk::ImageCreateInfo::NativeType*>(image_info), &alloc_info,
+		    &native, &image.allocation, nullptr));
+	};
+
 	vk::Image::CType native_image = VK_NULL_HANDLE;
-	const auto        result       = static_cast<vk::Result>(
-	    vmaCreateImage(allocator, static_cast<const vk::ImageCreateInfo::NativeType*>(image_info),
-	                   &alloc_info, &native_image, &image.allocation, nullptr));
+	auto             result       = allocate(native_image);
+	// Optimal-tiling images cannot fall back to host-visible memory, so reclaim cached device
+	// memory and retry once before giving up.
+	if (result == vk::Result::eErrorOutOfDeviceMemory && memory_pressure_handler != nullptr &&
+	    !memory_pressure_active) {
+		memory_pressure_active = true;
+		memory_pressure_handler();
+		memory_pressure_active = false;
+		result                 = allocate(native_image);
+	}
 	image.image = native_image;
 	if (result != vk::Result::eSuccess) {
 		LogMemoryBudget();

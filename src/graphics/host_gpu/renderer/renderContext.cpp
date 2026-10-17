@@ -19,9 +19,14 @@ RenderContext::RenderContext(GraphicContext& graphics)
       m_buffer_cache(graphics, m_command_scheduler, m_page_manager, m_texture_cache),
       m_texture_cache(graphics, m_command_scheduler, m_page_manager, m_buffer_cache) {
 	EXIT_NOT_IMPLEMENTED(!Common::Thread::IsMainThread());
+	// On an out-of-memory allocation, release cached buffers so the allocation can be retried.
+	// Only the buffer cache is touched (clean buffers, no scheduler wait), which is re-entrant
+	// from image/buffer creation; the texture cache's lock is held during its own allocations.
+	m_graphics.SetMemoryPressureHandler([this] { m_buffer_cache.RunGarbageCollector(false); });
 }
 
 RenderContext::~RenderContext() {
+	m_graphics.SetMemoryPressureHandler(nullptr);
 	ShutdownGpu();
 	m_command_scheduler.Shutdown();
 }

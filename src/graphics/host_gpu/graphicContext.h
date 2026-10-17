@@ -6,6 +6,7 @@
 #include "common/threads.h"
 #include "graphics/host_gpu/vulkanCommon.h" // IWYU pragma: export
 
+#include <functional>
 #include <map>
 #include <mutex>
 #include <tuple>
@@ -99,6 +100,15 @@ struct GraphicContext {
 	[[nodiscard]] bool CanReportMemoryUsage() const noexcept { return memory_budget_ext_enabled; }
 	[[nodiscard]] uint64_t GetDeviceMemoryUsage() const;
 	[[nodiscard]] uint64_t GetTotalMemoryBudget() const;
+	// True when a guest buffer of `size` bytes should be placed in host-visible memory instead
+	// of the nearly exhausted device-local heap, leaving headroom for images and render
+	// targets that can only live there. Uses a throttled budget query.
+	[[nodiscard]] bool ShouldSpillHostMemory(uint64_t size) const;
+	// Called when a host allocation fails with out-of-device-memory so the renderer can
+	// reclaim cached memory before the allocation is retried once.
+	void SetMemoryPressureHandler(std::function<void()> handler) {
+		memory_pressure_handler = std::move(handler);
+	}
 	[[nodiscard]] bool     CreateImage(const vk::ImageCreateInfo& info, VulkanImage& image);
 	void                   DeleteImage(VulkanImage& image);
 
@@ -106,6 +116,13 @@ struct GraphicContext {
 	uint32_t screen_height = 0;
 
 private:
+	std::function<void()> memory_pressure_handler;
+	bool                  memory_pressure_active = false;
+	// Throttled budget query cache for ShouldSpillHostMemory (render-thread only).
+	mutable uint64_t m_spill_usage     = 0;
+	mutable uint64_t m_spill_budget    = 0;
+	mutable uint32_t m_spill_tick      = 0;
+
 	mutable std::mutex                                 m_format_properties_mutex;
 	mutable std::map<vk::Format, vk::FormatProperties> m_format_properties;
 	mutable std::mutex                                 m_image_format_properties_mutex;

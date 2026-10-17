@@ -637,7 +637,7 @@ bool BufferCache::IsRegionCpuModified(uint64_t vaddr, uint64_t size) {
 	return m_memory_tracker.IsRegionCpuModified(vaddr, size);
 }
 
-void BufferCache::RunGarbageCollector() {
+void BufferCache::RunGarbageCollector(bool allow_dirty_downloads) {
 	const auto tick       = m_gc_tick++;
 	m_last_gc_freed       = 0;
 	m_last_gc_freed_bytes = 0;
@@ -666,7 +666,7 @@ void BufferCache::RunGarbageCollector() {
 		                                           buffer.Size(), "garbage collection");
 		const bool dirty = m_memory_tracker.IsRegionGpuModified(buffer.CpuAddress(), buffer.Size());
 		if (dirty) {
-			if (!aggressive || dirty_buffers.size() >= dirty_limit) {
+			if (!aggressive || !allow_dirty_downloads || dirty_buffers.size() >= dirty_limit) {
 				return false;
 			}
 			EXIT_NOT_IMPLEMENTED(!DownloadBufferMemory<true>(buffer, buffer.CpuAddress(), buffer.Size()));

@@ -68,12 +68,20 @@ Buffer::Buffer(GraphicContext& graphics, CommandScheduler& scheduler, MemoryUsag
 
 	const bool with_bda = bool(flags & vk::BufferUsageFlagBits::eShaderDeviceAddress);
 	VmaAllocationCreateInfo allocation_info {};
-	allocation_info.flags =
-	    VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT | AllocationFlags(usage);
+	allocation_info.flags = VMA_ALLOCATION_CREATE_WITHIN_BUDGET_BIT | AllocationFlags(usage);
 	allocation_info.usage = AllocationUsage(usage);
-	allocation_info.preferredFlags = usage == MemoryUsage::DeviceLocal
-	                                     ? VkMemoryPropertyFlags {}
-	                                     : VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+	if (usage == MemoryUsage::DeviceLocal) {
+		// Guest buffers are flexible and may spill to host-visible memory once the device-local
+		// heap is nearly full, so streaming churn does not starve images and render targets that
+		// can only be allocated there.
+		if (graphics.ShouldSpillHostMemory(size)) {
+			allocation_info.usage          = VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
+			allocation_info.preferredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+			                                 VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+		}
+	} else {
+		allocation_info.preferredFlags = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+	}
 
 	VmaAllocationInfo allocation_result {};
 	VkBuffer          native_buffer = VK_NULL_HANDLE;
