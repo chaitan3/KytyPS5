@@ -11,6 +11,7 @@
 #include "graphics/host_gpu/renderer/cache/multiLevelPageTable.h"
 #include "graphics/host_gpu/renderer/cache/streamBuffer.h"
 
+#include <array>
 #include <map>
 #include <span>
 #include <utility>
@@ -86,11 +87,30 @@ public:
 	}
 	void               RunGarbageCollector();
 
-	// Diagnostics: bytes/counts owned by the cache, independent of device usage.
-	[[nodiscard]] uint64_t GetAccountedMemory() const noexcept { return m_accounted_memory; }
-	[[nodiscard]] uint64_t GetBufferCount() const noexcept { return m_buffer_count; }
+	// Diagnostics: bytes/counts owned by the cache (independent of device usage), the live
+	// size distribution bucketed by floor(log2(bytes)), and what the last collection freed.
+	static constexpr uint32_t kSizeBuckets = 64;
+	struct MemoryStats {
+		uint64_t                           accounted_memory    = 0;
+		uint64_t                           buffer_count        = 0;
+		uint64_t                           last_gc_freed       = 0;
+		uint64_t                           last_gc_freed_bytes = 0;
+		std::array<uint64_t, kSizeBuckets> size_histogram {};
+	};
+	[[nodiscard]] MemoryStats GetMemoryStats() const noexcept {
+		return {m_accounted_memory, m_buffer_count, m_last_gc_freed, m_last_gc_freed_bytes,
+		        m_size_histogram};
+	}
 
 private:
+	static uint32_t SizeBucket(uint64_t size) noexcept {
+		uint32_t bucket = 0;
+		while (size > 1u) {
+			size >>= 1u;
+			++bucket;
+		}
+		return bucket;
+	}
 	friend struct BufferCacheTestAccess;
 
 	bool IsBufferInvalid(BufferId id) const {
@@ -148,6 +168,9 @@ private:
 	uint64_t                                          m_total_used_memory  = 0;
 	uint64_t                                          m_accounted_memory   = 0;
 	uint64_t                                          m_buffer_count       = 0;
+	uint64_t                                          m_last_gc_freed      = 0;
+	uint64_t                                          m_last_gc_freed_bytes = 0;
+	std::array<uint64_t, kSizeBuckets>                m_size_histogram {};
 	uint64_t m_trigger_gc_memory  = 1ull * 1024 * 1024 * 1024;
 	uint64_t m_critical_gc_memory = 2ull * 1024 * 1024 * 1024;
 	uint64_t m_gc_tick            = 0;

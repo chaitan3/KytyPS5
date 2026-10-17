@@ -120,6 +120,7 @@ void BufferCache::ChangeRegister(BufferId id) {
 		m_total_used_memory += buffer.Size();
 		m_accounted_memory += buffer.Size();
 		++m_buffer_count;
+		++m_size_histogram[SizeBucket(buffer.Size())];
 		buffer.lru_id = m_lru_cache.Insert(id, m_gc_tick);
 		std::vector<vk::DeviceAddress> addresses;
 		addresses.reserve(size_pages);
@@ -138,6 +139,9 @@ void BufferCache::ChangeRegister(BufferId id) {
 		EXIT_IF(buffer.Size() > m_accounted_memory);
 		m_accounted_memory -= buffer.Size();
 		--m_buffer_count;
+		const auto bucket = SizeBucket(buffer.Size());
+		EXIT_IF(m_size_histogram[bucket] == 0);
+		--m_size_histogram[bucket];
 		m_lru_cache.Free(buffer.lru_id);
 		m_bda_pagetable_buffer.Fill(table_offset,
 		                            size_pages * sizeof(vk::DeviceAddress), 0);
@@ -634,7 +638,9 @@ bool BufferCache::IsRegionCpuModified(uint64_t vaddr, uint64_t size) {
 }
 
 void BufferCache::RunGarbageCollector() {
-	const auto tick = m_gc_tick++;
+	const auto tick       = m_gc_tick++;
+	m_last_gc_freed       = 0;
+	m_last_gc_freed_bytes = 0;
 	if (m_graphics.CanReportMemoryUsage()) {
 		m_total_used_memory = m_graphics.GetDeviceMemoryUsage();
 	}
@@ -662,7 +668,10 @@ void BufferCache::RunGarbageCollector() {
 			dirty_buffers.push_back(id);
 		} else {
 			m_memory_tracker.UntrackMemory(buffer.CpuAddress(), buffer.Size());
+			const auto freed_bytes = buffer.Size();
 			DeleteBuffer(id);
+			++m_last_gc_freed;
+			m_last_gc_freed_bytes += freed_bytes;
 		}
 		return ++retire_count == limit;
 	});
@@ -682,8 +691,11 @@ void BufferCache::RunGarbageCollector() {
 			EXIT("BufferCache: garbage collection retained GPU ownership\n");
 		}
 		m_memory_tracker.UntrackMemory(buffer.CpuAddress(), buffer.Size());
+		const auto freed_bytes = buffer.Size();
 		Unregister(id);
 		m_slot_buffers.erase(id);
+		++m_last_gc_freed;
+		m_last_gc_freed_bytes += freed_bytes;
 	}
 }
 

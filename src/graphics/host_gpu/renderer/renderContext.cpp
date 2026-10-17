@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cinttypes>
+#include <string>
 
 namespace Libs::Graphics {
 
@@ -160,14 +161,24 @@ void RenderContext::LogMemoryDiagnostics() {
 		return;
 	}
 	const auto textures = m_texture_cache.GetMemoryStats();
+	const auto buffers  = m_buffer_cache.GetMemoryStats();
 	LOGF("GPU memory: device=%" PRIu64 " budget=%" PRIu64 " textures=%" PRIu64
 	     " images=%" PRIu64 " buffers=%" PRIu64 "/%" PRIu64 " gc_textures=%" PRIu64
-	     " gc_bytes=%" PRIu64 "\n",
+	     "/%" PRIu64 " gc_buffers=%" PRIu64 "/%" PRIu64 "\n",
 	     usage, budget, textures.accounted_memory, textures.registered_images,
-	     m_buffer_cache.GetAccountedMemory(), m_buffer_cache.GetBufferCount(),
-	     textures.last_gc_freed, textures.last_gc_freed_bytes);
+	     buffers.accounted_memory, buffers.buffer_count, textures.last_gc_freed,
+	     textures.last_gc_freed_bytes, buffers.last_gc_freed, buffers.last_gc_freed_bytes);
 	if (tick) {
 		m_graphics.LogMemoryBudget();
+		std::string histogram;
+		for (uint32_t bucket = 0; bucket < BufferCache::kSizeBuckets; ++bucket) {
+			if (buffers.size_histogram[bucket] == 0) {
+				continue;
+			}
+			histogram += " 2^" + std::to_string(bucket) + ":" +
+			             std::to_string(buffers.size_histogram[bucket]);
+		}
+		LOGF("GPU buffer sizes (power-of-two bytes):%s\n", histogram.c_str());
 	}
 }
 
