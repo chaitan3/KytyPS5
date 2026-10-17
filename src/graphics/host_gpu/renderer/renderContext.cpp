@@ -26,9 +26,10 @@ RenderContext::RenderContext(GraphicContext& graphics)
 		// Texture statistics cannot be read here (their lock may be held by the allocation
 		// path), but buffer accounting is lock-free and tells us whether the burst is buffers.
 		const auto buffers = m_buffer_cache.GetMemoryStats();
-		LOGF("GPU OOM: device=%" PRIu64 " budget=%" PRIu64 " buffers=%" PRIu64 "/%" PRIu64
-		     "/%" PRIu64 " pending=%" PRIu64 "\n",
+		LOGF("GPU OOM: device=%" PRIu64 " budget=%" PRIu64 " textures=%" PRIu64 " images=%" PRIu64
+		     " buffers=%" PRIu64 "/%" PRIu64 "/%" PRIu64 " pending=%" PRIu64 "\n",
 		     m_graphics.GetDeviceMemoryUsage(), m_graphics.GetTotalMemoryBudget(),
+		     m_texture_cache.GetAccountedMemoryUnsafe(), m_texture_cache.GetLiveImageCountUnsafe(),
 		     buffers.accounted_memory, buffers.buffer_count, buffers.total_buffers,
 		     m_command_scheduler.PendingOperationCount());
 		m_buffer_cache.RunGarbageCollector(false);

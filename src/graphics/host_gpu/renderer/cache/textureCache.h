@@ -90,6 +90,11 @@ public:
 	};
 	[[nodiscard]] MemoryStats GetMemoryStats();
 
+	// Diagnostics only: unsynchronized reads safe to call from an allocation-failure path where
+	// m_lock cannot be taken because the caller may already hold it.
+	[[nodiscard]] uint64_t GetLiveImageCountUnsafe() const noexcept { return m_slot_images.size(); }
+	[[nodiscard]] uint64_t GetAccountedMemoryUnsafe() const noexcept { return m_accounted_memory; }
+
 private:
 	struct MetaDataInfo {
 		enum class Type : uint8_t { CMask, FMask, HTile };
