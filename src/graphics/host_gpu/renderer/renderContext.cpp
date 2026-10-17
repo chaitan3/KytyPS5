@@ -22,7 +22,17 @@ RenderContext::RenderContext(GraphicContext& graphics)
 	// On an out-of-memory allocation, release cached buffers so the allocation can be retried.
 	// Only the buffer cache is touched (clean buffers, no scheduler wait), which is re-entrant
 	// from image/buffer creation; the texture cache's lock is held during its own allocations.
-	m_graphics.SetMemoryPressureHandler([this] { m_buffer_cache.RunGarbageCollector(false); });
+	m_graphics.SetMemoryPressureHandler([this] {
+		// Texture statistics cannot be read here (their lock may be held by the allocation
+		// path), but buffer accounting is lock-free and tells us whether the burst is buffers.
+		const auto buffers = m_buffer_cache.GetMemoryStats();
+		LOGF("GPU OOM: device=%" PRIu64 " budget=%" PRIu64 " buffers=%" PRIu64 "/%" PRIu64
+		     "/%" PRIu64 " pending=%" PRIu64 "\n",
+		     m_graphics.GetDeviceMemoryUsage(), m_graphics.GetTotalMemoryBudget(),
+		     buffers.accounted_memory, buffers.buffer_count, buffers.total_buffers,
+		     m_command_scheduler.PendingOperationCount());
+		m_buffer_cache.RunGarbageCollector(false);
+	});
 }
 
 RenderContext::~RenderContext() {
