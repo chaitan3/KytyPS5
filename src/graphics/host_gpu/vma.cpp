@@ -132,12 +132,25 @@ bool GraphicContext::ShouldSpillHostMemory(uint64_t size) const {
 	if (!CanReportMemoryUsage()) {
 		return false;
 	}
-	// vmaGetHeapBudgets is a driver call, so sample it periodically rather than per allocation.
-	if ((m_spill_tick++ & 0x1fu) == 0u) {
+	// vmaGetHeapBudgets is a driver call, so sample it every few allocations. A tight sample
+	// matters because a streaming burst can allocate gigabytes between frame boundaries.
+	if ((m_spill_tick++ & 0x7u) == 0u) {
 		m_spill_usage  = GetDeviceMemoryUsage();
 		m_spill_budget = GetTotalMemoryBudget();
 	}
-	return m_spill_budget != 0 && m_spill_usage + size > m_spill_budget;
+	// Keep a real reserve: images and render targets cannot leave device-local memory, so leave
+	// them room once guest buffers start spilling rather than filling the heap to the brim.
+	constexpr uint64_t reserve = 2ull * 1024 * 1024 * 1024;
+	const auto         headroom =
+	    m_spill_budget > reserve ? m_spill_budget - reserve : uint64_t {0};
+	const bool spill = m_spill_budget != 0 && m_spill_usage + size > headroom;
+	if (spill && m_spill_logged < 8u) {
+		++m_spill_logged;
+		LOGF("GPU buffer spill to host-visible: size=%" PRIu64 " usage=%" PRIu64
+		     " budget=%" PRIu64 "\n",
+		     size, m_spill_usage, m_spill_budget);
+	}
+	return spill;
 }
 
 bool GraphicContext::CreateImage(const vk::ImageCreateInfo& image_info, VulkanImage& image) {

@@ -75,7 +75,10 @@ Buffer::Buffer(GraphicContext& graphics, CommandScheduler& scheduler, MemoryUsag
 		// heap is nearly full, so streaming churn does not starve images and render targets that
 		// can only be allocated there.
 		if (graphics.ShouldSpillHostMemory(size)) {
+			// Require host-visible memory: AUTO_PREFER_HOST alone still lets VMA keep choosing
+			// device-local while it fits, which defeats the spill.
 			allocation_info.usage          = VMA_MEMORY_USAGE_AUTO_PREFER_HOST;
+			allocation_info.requiredFlags  = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT;
 			allocation_info.preferredFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
 			                                 VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 		}

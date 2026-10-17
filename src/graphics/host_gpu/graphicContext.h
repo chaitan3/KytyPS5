@@ -122,6 +122,7 @@ private:
 	mutable uint64_t m_spill_usage     = 0;
 	mutable uint64_t m_spill_budget    = 0;
 	mutable uint32_t m_spill_tick      = 0;
+	mutable uint32_t m_spill_logged    = 0;
 
 	mutable std::mutex                                 m_format_properties_mutex;
 	mutable std::map<vk::Format, vk::FormatProperties> m_format_properties;
