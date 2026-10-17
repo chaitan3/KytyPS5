@@ -6,6 +6,7 @@
 #include "common/threads.h"
 #include "graphics/host_gpu/vulkanCommon.h" // IWYU pragma: export
 
+#include <atomic>
 #include <functional>
 #include <map>
 #include <mutex>
@@ -115,6 +116,11 @@ struct GraphicContext {
 	uint32_t screen_width  = 0;
 	uint32_t screen_height = 0;
 
+	// Diagnostics: live bytes of every VMA buffer/image allocation, including those owned
+	// outside the buffer/texture caches (utility buffers, tiler scratch, etc.).
+	std::atomic<uint64_t> total_buffer_bytes {0};
+	std::atomic<uint64_t> total_image_bytes {0};
+
 private:
 	std::function<void()> memory_pressure_handler;
 	bool                  memory_pressure_active = false;
@@ -154,7 +160,8 @@ struct VulkanImage {
 	vk::Image                     image       = nullptr;
 	VulkanImageState              state;
 	std::vector<VulkanImageState> subresource_states;
-	VmaAllocation                allocation = nullptr;
+	VmaAllocation                allocation      = nullptr;
+	uint64_t                     allocation_size = 0;
 };
 
 

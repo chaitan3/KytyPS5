@@ -90,6 +90,7 @@ private:
 	vk::Buffer                    m_buffer     = nullptr;
 	VmaAllocation                 m_allocation = nullptr;
 	uint64_t                      m_size;
+	uint64_t                      m_allocation_size = 0;
 	bool                          m_coherent = false;
 	std::span<uint8_t>            m_mapped;
 };

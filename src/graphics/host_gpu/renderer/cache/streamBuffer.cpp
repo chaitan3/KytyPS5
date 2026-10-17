@@ -96,7 +96,9 @@ Buffer::Buffer(GraphicContext& graphics, CommandScheduler& scheduler, MemoryUsag
 	}
 	EXIT_NOT_IMPLEMENTED(result != vk::Result::eSuccess);
 
-	m_buffer = native_buffer;
+	m_buffer          = native_buffer;
+	m_allocation_size = allocation_result.size;
+	graphics.total_buffer_bytes.fetch_add(m_allocation_size, std::memory_order_relaxed);
 	if (with_bda) {
 		vk::BufferDeviceAddressInfo address_info {};
 		address_info.buffer = m_buffer;
@@ -116,6 +118,7 @@ Buffer::Buffer(GraphicContext& graphics, CommandScheduler& scheduler, MemoryUsag
 Buffer::~Buffer() {
 	if (m_buffer != nullptr) {
 		vmaDestroyBuffer(m_graphics->allocator, m_buffer, m_allocation);
+		m_graphics->total_buffer_bytes.fetch_sub(m_allocation_size, std::memory_order_relaxed);
 	}
 }
 

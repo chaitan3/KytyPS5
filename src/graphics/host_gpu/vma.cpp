@@ -160,11 +160,13 @@ bool GraphicContext::CreateImage(const vk::ImageCreateInfo& image_info, VulkanIm
 	VmaAllocationCreateInfo alloc_info {};
 	alloc_info.requiredFlags = VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
 
-	const auto allocate = [&](vk::Image::CType& native) {
-		image.allocation = nullptr;
+	VmaAllocationInfo allocation_result {};
+	const auto        allocate = [&](vk::Image::CType& native) {
+		image.allocation  = nullptr;
+		allocation_result = {};
 		return static_cast<vk::Result>(vmaCreateImage(
 		    allocator, static_cast<const vk::ImageCreateInfo::NativeType*>(image_info), &alloc_info,
-		    &native, &image.allocation, nullptr));
+		    &native, &image.allocation, &allocation_result));
 	};
 
 	vk::Image::CType native_image = VK_NULL_HANDLE;
@@ -183,6 +185,8 @@ bool GraphicContext::CreateImage(const vk::ImageCreateInfo& image_info, VulkanIm
 		LogMemoryBudget();
 		return false;
 	}
+	image.allocation_size = allocation_result.size;
+	total_image_bytes.fetch_add(image.allocation_size, std::memory_order_relaxed);
 
 	image.format     = image_info.format;
 	image.image_type = image_info.imageType;
@@ -203,8 +207,10 @@ void GraphicContext::DeleteImage(VulkanImage& image) {
 	EXIT_IF(allocator == nullptr || image.image == nullptr || image.allocation == nullptr);
 
 	vmaDestroyImage(allocator, image.image, image.allocation);
-	image.image      = nullptr;
-	image.allocation = nullptr;
+	total_image_bytes.fetch_sub(image.allocation_size, std::memory_order_relaxed);
+	image.image           = nullptr;
+	image.allocation      = nullptr;
+	image.allocation_size = 0;
 }
 
 } // namespace Libs::Graphics
