@@ -35,6 +35,9 @@ RenderContext::RenderContext(GraphicContext& graphics)
 		     m_graphics.total_buffer_bytes.load(std::memory_order_relaxed),
 		     m_graphics.total_image_bytes.load(std::memory_order_relaxed),
 		     m_command_scheduler.PendingOperationCount());
+		// Best effort: the texture cache may already hold its lock here, in which case the
+		// purge is skipped and only cached buffers are released before the retry.
+		m_texture_cache.TryCollectUnderPressure();
 		m_buffer_cache.RunGarbageCollector(false);
 	});
 }
@@ -183,12 +186,14 @@ void RenderContext::LogMemoryDiagnostics() {
 	const auto buffers  = m_buffer_cache.GetMemoryStats();
 	LOGF("GPU memory: device=%" PRIu64 " budget=%" PRIu64 " textures=%" PRIu64
 	     " images=%" PRIu64 "/%" PRIu64 " buffers=%" PRIu64 "/%" PRIu64 "/%" PRIu64
-	     " vma_bufs=%" PRIu64 " vma_imgs=%" PRIu64 " gc_textures=%" PRIu64 "/%" PRIu64
-	     " gc_buffers=%" PRIu64 "/%" PRIu64 " pending=%" PRIu64 "\n",
+	     " vma_bufs=%" PRIu64 " vma_imgs=%" PRIu64 " tex_new=%" PRIu64 " tex_hit=%" PRIu64
+	     " tex_free=%" PRIu64 " gc_textures=%" PRIu64 "/%" PRIu64 " gc_buffers=%" PRIu64
+	     "/%" PRIu64 " pending=%" PRIu64 "\n",
 	     usage, budget, textures.accounted_memory, textures.registered_images,
 	     textures.total_images, buffers.accounted_memory, buffers.buffer_count,
 	     buffers.total_buffers, m_graphics.total_buffer_bytes.load(std::memory_order_relaxed),
-	     m_graphics.total_image_bytes.load(std::memory_order_relaxed), textures.last_gc_freed,
+	     m_graphics.total_image_bytes.load(std::memory_order_relaxed), textures.created,
+	     textures.touched, textures.freed, textures.last_gc_freed,
 	     textures.last_gc_freed_bytes, buffers.last_gc_freed, buffers.last_gc_freed_bytes,
 	     m_command_scheduler.PendingOperationCount());
 	if (tick) {

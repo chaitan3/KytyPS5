@@ -53,6 +53,14 @@ public:
 		m_owner.store(0, std::memory_order_relaxed);
 		m_lock.clear(std::memory_order_release);
 	}
+	// Non-blocking acquire; returns false if the lock is already held (including by this thread).
+	[[nodiscard]] bool try_lock() noexcept {
+		if (m_lock.test_and_set(std::memory_order_acquire)) {
+			return false;
+		}
+		m_owner.store(CurrentThread(), std::memory_order_relaxed);
+		return true;
+	}
 
 private:
 	static uint32_t CurrentThread() noexcept {

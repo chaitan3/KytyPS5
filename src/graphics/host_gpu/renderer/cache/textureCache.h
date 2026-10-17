@@ -87,8 +87,16 @@ public:
 		uint64_t total_images        = 0;
 		uint64_t last_gc_freed       = 0;
 		uint64_t last_gc_freed_bytes = 0;
+		// Since the previous collection: images created, accesses to live images, and frees.
+		uint64_t created             = 0;
+		uint64_t touched             = 0;
+		uint64_t freed               = 0;
 	};
 	[[nodiscard]] MemoryStats GetMemoryStats();
+	// Last-resort purge used from the image allocation-failure path. Takes m_lock only if it is
+	// free (the caller may already hold it), evicts even the current frame's LRU images, and
+	// skips GPU-modified ones to avoid scheduler waits. Returns false if the lock was busy.
+	bool TryCollectUnderPressure();
 
 	// Diagnostics only: unsynchronized reads safe to call from an allocation-failure path where
 	// m_lock cannot be taken because the caller may already hold it.
@@ -96,6 +104,8 @@ public:
 	[[nodiscard]] uint64_t GetAccountedMemoryUnsafe() const noexcept { return m_accounted_memory; }
 
 private:
+	void RunGarbageCollectorLocked(bool force);
+
 	struct MetaDataInfo {
 		enum class Type : uint8_t { CMask, FMask, HTile };
 
@@ -197,6 +207,12 @@ private:
 	uint64_t                                          m_registered_images  = 0;
 	uint64_t                                          m_last_gc_freed      = 0;
 	uint64_t                                          m_last_gc_freed_bytes = 0;
+	uint64_t                                          m_frame_created      = 0;
+	uint64_t                                          m_frame_touched      = 0;
+	uint64_t                                          m_frame_freed        = 0;
+	uint64_t                                          m_last_created       = 0;
+	uint64_t                                          m_last_touched       = 0;
+	uint64_t                                          m_last_freed         = 0;
 	uint64_t                                          m_trigger_gc_memory  = 0;
 	uint64_t                                          m_pressure_gc_memory = 1536ull * 1024 * 1024;
 	uint64_t         m_critical_gc_memory     = 3ull * 1024 * 1024 * 1024;

@@ -200,6 +200,7 @@ TextureCache::BindingType TextureCache::UploadBinding(const Image& image) {
 ImageId TextureCache::InsertImage(const ImageInfo& info) {
 	const auto id = m_slot_images.insert(m_graphics, m_scheduler, info);
 	RegisterImage(id);
+	++m_frame_created;
 	return id;
 }
 
@@ -249,6 +250,7 @@ void TextureCache::UnregisterImage(ImageId id) {
 	}
 	m_accounted_memory -= accounted;
 	--m_registered_images;
+	++m_frame_freed;
 	image.registered = false;
 }
 
@@ -297,6 +299,7 @@ void TextureCache::FreeImage(ImageId id) {
 void TextureCache::TouchImage(Image& image) {
 	if (image.registered) {
 		m_lru_cache.Touch(image.lru_id, m_gc_tick);
+		++m_frame_touched;
 	}
 }
 
@@ -1908,26 +1911,44 @@ void TextureCache::UnmapMemory(uint64_t address, uint64_t size) {
 
 TextureCache::MemoryStats TextureCache::GetMemoryStats() {
 	std::scoped_lock lock {m_lock};
-	return {m_accounted_memory, m_registered_images, m_slot_images.size(), m_last_gc_freed,
-	        m_last_gc_freed_bytes};
+	return {m_accounted_memory,
+	        m_registered_images,
+	        m_slot_images.size(),
+	        m_last_gc_freed,
+	        m_last_gc_freed_bytes,
+	        m_last_created,
+	        m_last_touched,
+	        m_last_freed};
 }
 
-void TextureCache::RunGarbageCollector() {
-	std::scoped_lock lock {m_lock};
-	const uint64_t   tick = m_gc_tick++;
+void TextureCache::RunGarbageCollectorLocked(bool force) {
+	const uint64_t tick = m_gc_tick++;
 	m_last_gc_freed       = 0;
 	m_last_gc_freed_bytes = 0;
+	m_last_created        = m_frame_created;
+	m_last_touched        = m_frame_touched;
+	m_last_freed          = m_frame_freed;
+	m_frame_created       = 0;
+	m_frame_touched       = 0;
+	m_frame_freed         = 0;
 	if (m_graphics.CanReportMemoryUsage()) {
 		m_total_used_memory = m_graphics.GetDeviceMemoryUsage();
 	}
-	if (m_total_used_memory < m_trigger_gc_memory) {
+	if (!force && m_total_used_memory < m_trigger_gc_memory) {
 		return;
 	}
 	const auto collect = [&](bool allow_aggressive) {
-		bool           pressured  = m_total_used_memory >= m_pressure_gc_memory;
-		bool           aggressive = allow_aggressive && m_total_used_memory >= m_critical_gc_memory;
-		const uint64_t age       = std::min<uint64_t>(aggressive ? 160 : pressured ? 80 : 16, tick);
-		size_t         deletions = aggressive ? 40 : pressured ? 20 : 10;
+		bool pressured  = force || m_total_used_memory >= m_pressure_gc_memory;
+		bool aggressive = (force || allow_aggressive) && m_total_used_memory >= m_critical_gc_memory;
+		// Protect the current frame's images during normal operation (age 1 excludes the tick
+		// that touches made this frame). A forced collection may evict them too, but only clean
+		// ones, so no scheduler waits are issued from the allocation-failure path.
+		const uint64_t age =
+		    force ? 0 : std::min<uint64_t>(pressured || aggressive ? 1 : 16, tick);
+		size_t deletions = force ? 8192 : aggressive ? 4096 : pressured ? 1024 : 64;
+		const uint64_t target = force                    ? m_pressure_gc_memory
+		                        : aggressive             ? m_critical_gc_memory
+		                                                 : m_trigger_gc_memory;
 		std::vector<ImageId> candidates;
 		candidates.reserve(deletions);
 		// Deleting depth recursively deletes its stencil association, so finish LRU traversal
@@ -1937,7 +1958,7 @@ void TextureCache::RunGarbageCollector() {
 			return candidates.size() == deletions;
 		});
 		for (const auto id: candidates) {
-			if (deletions == 0) {
+			if (deletions == 0 || m_total_used_memory <= target) {
 				break;
 			}
 			--deletions;
@@ -1946,6 +1967,9 @@ void TextureCache::RunGarbageCollector() {
 				continue;
 			}
 			if (owner->IsGpuModified()) {
+				if (force) {
+					continue;
+				}
 				const bool safe = owner->SafeToDownload();
 				if (safe && owner->info.IsTiled()) {
 					continue;
@@ -1961,20 +1985,26 @@ void TextureCache::RunGarbageCollector() {
 			FreeImage(id);
 			++m_last_gc_freed;
 			m_last_gc_freed_bytes += freed_bytes;
-			if (m_total_used_memory < m_critical_gc_memory && aggressive) {
-				deletions >>= 2;
-				aggressive = false;
-			}
-			if (m_total_used_memory < m_pressure_gc_memory && pressured) {
-				deletions >>= 1;
-				pressured = false;
-			}
 		}
 	};
 	collect(false);
 	if (m_total_used_memory >= m_critical_gc_memory) {
 		collect(true);
 	}
+}
+
+void TextureCache::RunGarbageCollector() {
+	std::scoped_lock lock {m_lock};
+	RunGarbageCollectorLocked(false);
+}
+
+bool TextureCache::TryCollectUnderPressure() {
+	if (!m_lock.try_lock()) {
+		return false;
+	}
+	RunGarbageCollectorLocked(true);
+	m_lock.unlock();
+	return true;
 }
 
 void TextureCache::ProcessDownloadImages() {
