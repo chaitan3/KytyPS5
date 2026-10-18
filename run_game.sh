@@ -2,9 +2,9 @@
 set -e
 
 #GAME="/mnt/nas/Games/emulators/ps5/Demon Souls/PPSA01341-app0"
-#GAME="/mnt/nas/Games/emulators/ps5/Ghost of Yotei/PPSA26344-app0"
+GAME="/mnt/nas/Games/emulators/ps5/Ghost of Yotei/PPSA26344-app0"
 #GAME="/mnt/nas/Games/emulators/ps5/Astro Bot/PPSA21564-app0"
-GAME="/mnt/nas/Games/emulators/ps5/Call of Duty Vanguard/PPSA01687-app"
+#GAME="/mnt/nas/Games/emulators/ps5/Call of Duty Vanguard/PPSA01687-app"
 EMULATOR="_Build/linux/kyty_emulator"
 PATCH="_Patches/PPSA21564.json"
 
@@ -23,8 +23,7 @@ if [ ! -d "$GAME" ]; then
     exit 1
 fi
 
+exec "$EMULATOR" --game "$GAME"
 #exec "$EMULATOR" --game "$GAME" --game-patch $PATCH
-#exec "$EMULATOR" --game "$GAME"
 #exec "$EMULATOR" --game "$GAME" --skip-notice-screen 1 --playgo-hack --amd-cpu
-#exec "$EMULATOR" --game "$GAME" --amd-cpu --game-patch ./_Patches/PPSA01687.json
-exec "$EMULATOR" --game "$GAME" --network-connected true
+#exec "$EMULATOR" --game "$GAME" --network-connected true --addcont-dir "$GAME"
